@@ -1,21 +1,103 @@
+# Plant-AI - Système de Diagnostic Intelligent des Maladies Végétales
+# Dépendances unifiées pour développement et production
+
+# =============================================================================
+# CORE DEPENDENCIES - Dépendances principales
+# =============================================================================
+
+# Machine Learning et Computer Vision
 ultralytics>=8.3.0,<9
-fastapi==0.115.0
-uvicorn==0.30.6
-pydantic==2.9.2
-pydantic-settings==2.5.1
-python-multipart==0.0.12
-# Python 3.13 compatible NumPy
 numpy>=2.1.1,<3
 opencv-python==4.10.0.84
 Pillow==10.4.0
-# COCO conversion script does not require pycocotools; remove Windows-only package
-# If you need COCO evaluation later, install: pip install pycocotools (may require a supported Python version)
+
+# API Backend
+fastapi>=0.104.0,<0.116.0
+uvicorn>=0.24.0,<0.31.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0,<2.10.0
+pydantic-settings>=2.1.0,<2.6.0
+python-multipart>=0.0.6,<0.1.0
+
+# =============================================================================
+# DATABASE - Base de données
+# =============================================================================
+
+# SQLite (développement)
+# Inclus par défaut avec Python
+
+# PostgreSQL (production)
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.7
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+
+# =============================================================================
+# PERFORMANCE ET MONITORING - Performance et surveillance
+# =============================================================================
+
+redis>=5.0.0
+prometheus-client>=0.19.0
+structlog>=23.2.0
+sentry-sdk[fastapi]>=1.38.0
+python-json-logger>=2.0.7
+
+# =============================================================================
+# HTTP ET RÉSEAU - Communication
+# =============================================================================
+
+httpx==0.27.0
+aiofiles>=23.2.0
+
+# =============================================================================
+# UTILITAIRES - Outils
+# =============================================================================
+
 typer==0.12.5
 click==8.1.7
 rich==13.8.1
 tabulate==0.9.0
 PyJWT==2.9.0
+
+# =============================================================================
+# SÉCURITÉ - Sécurité
+# =============================================================================
+
+cryptography>=41.0.0
+python-jose[cryptography]>=3.3.0
+
+# =============================================================================
+# TESTS ET DÉVELOPPEMENT - Tests
+# =============================================================================
+
 pytest==8.3.3
-httpx==0.27.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# =============================================================================
+# SERVEUR DE PRODUCTION - Production
+# =============================================================================
+
+gunicorn>=21.2.0
+
+# =============================================================================
+# DÉPLOIEMENT - Déploiement
+# =============================================================================
+
+docker>=6.1.0
+
+# =============================================================================
+# NOTES D'INSTALLATION
+# =============================================================================
+
+# Pour l'évaluation COCO (optionnel) :
+# pip install pycocotools (peut nécessiter une version Python supportée)
+
+# Pour le développement uniquement :
+# pip install -r requirements.txt
+
+# Pour la production avec PostgreSQL :
+# pip install -r requirements.txt
+# docker-compose up -d  # Pour PostgreSQL
 
 
