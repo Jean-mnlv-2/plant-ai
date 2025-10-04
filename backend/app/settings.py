@@ -40,6 +40,13 @@ class Settings(BaseSettings):
         default_factory=lambda: ["image/jpeg", "image/png", "image/jpg", "image/webp"]
     )
 
+    # Inference thresholds & quality
+    confidence_threshold_low: float = Field(default=0.35, ge=0.0, le=1.0)
+    confidence_threshold_high: float = Field(default=0.7, ge=0.0, le=1.0)
+    blur_variance_threshold: float = Field(default=100.0, ge=0.0)
+    enable_quality_checks: bool = Field(default=True)
+    enable_uncertainty_routing: bool = Field(default=True)
+
     # JWT Authentication
     jwt_ttl_seconds: int = Field(default=8 * 3600)  # 8 hours
 

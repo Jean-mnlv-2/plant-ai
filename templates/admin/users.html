@@ -1,0 +1,20 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Utilisateurs</h1>
+
+<div class="bg-white rounded shadow p-4">
+  <ul class="list-disc list-inside">
+  {% for u in users %}
+    <li>{{ u }}</li>
+  {% endfor %}
+  </ul>
+  {% if not users %}
+    <div class="text-gray-500">Aucun utilisateur trouvé.</div>
+  {% endif %}
+{% endblock %}
+
+
+
+
+
+

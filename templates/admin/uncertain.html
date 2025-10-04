@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Cas incertains</h1>
+
+<div class="bg-white rounded shadow p-4">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b text-gray-600">
+        <th class="text-left py-2">Date</th>
+        <th class="text-left">Fichier</th>
+        <th class="text-left">Raison</th>
+        <th class="text-right">Min conf</th>
+        <th class="text-right">Max conf</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+      <tr class="border-b last:border-0">
+        <td class="py-2">{{ it.timestamp }}</td>
+        <td>{{ it.image_filename or '-' }}</td>
+        <td>{{ it.reason }}</td>
+        <td class="text-right">{{ it.min_confidence }}</td>
+        <td class="text-right">{{ it.max_confidence }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="flex justify-between items-center mt-3">
+    <button
+      class="px-3 py-1 bg-gray-100 rounded disabled:opacity-50"
+      hx-get="/admin/uncertain?page={{ page-1 if page>1 else 1 }}&size={{ size }}"
+      hx-target="main"
+      hx-swap="innerHTML"
+      {% if page<=1 %}disabled{% endif %}
+    >Précédent</button>
+    <div class="text-sm">Page {{ page }} • Total {{ total }}</div>
+    <button
+      class="px-3 py-1 bg-gray-100 rounded disabled:opacity-50"
+      hx-get="/admin/uncertain?page={{ page+1 }}&size={{ size }}"
+      hx-target="main"
+      hx-swap="innerHTML"
+      {% if page*size >= total %}disabled{% endif %}
+    >Suivant</button>
+  </div>
+</div>
+{% endblock %}
+
+

@@ -1,0 +1,46 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Dashboard</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+  <div class="bg-white rounded shadow p-4">
+    <div class="text-sm text-gray-500">Requêtes (24h)</div>
+    <div class="text-3xl font-bold">{{ stats.general.total_requests or 0 }}</div>
+  </div>
+  <div class="bg-white rounded shadow p-4">
+    <div class="text-sm text-gray-500">Temps moyen (ms)</div>
+    <div class="text-3xl font-bold">{{ stats.general.avg_response_time or 0 }}</div>
+  </div>
+  <div class="bg-white rounded shadow p-4">
+    <div class="text-sm text-gray-500">Prédictions (7j)</div>
+    <div class="text-3xl font-bold">{{ model_usage.total_predictions or 0 }}</div>
+  </div>
+</div>
+
+<div class="mt-6 bg-white rounded shadow p-4">
+  <h2 class="text-lg font-semibold mb-2">Endpoints les plus utilisés</h2>
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b text-gray-600">
+        <th class="text-left py-2">Endpoint</th>
+        <th class="text-right">Requêtes</th>
+        <th class="text-right">Erreur</th>
+        <th class="text-right">Temps moyen</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for ep in stats.by_endpoint %}
+      <tr class="border-b last:border-0">
+        <td class="py-2">{{ ep.endpoint }}</td>
+        <td class="text-right">{{ ep.request_count }}</td>
+        <td class="text-right">{{ ep.error_count }}</td>
+        <td class="text-right">{{ ep.avg_response_time|round(2) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+
+

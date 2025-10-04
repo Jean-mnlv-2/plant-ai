@@ -1,0 +1,16 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Informations modèle</h1>
+
+<div class="bg-white rounded shadow p-4">
+  <div><span class="text-gray-600">Chemin:</span> {{ model.model_path }}</div>
+  <div><span class="text-gray-600">Existe:</span> {{ model.model_exists }}</div>
+  <div><span class="text-gray-600">Max upload (MB):</span> {{ settings.max_upload_bytes // (1024*1024) }}</div>
+</div>
+{% endblock %}
+
+
+
+
+
+

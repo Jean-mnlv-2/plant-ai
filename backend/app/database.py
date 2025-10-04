@@ -68,6 +68,35 @@ class Database:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_endpoint ON performance_metrics(endpoint)")
                 
                 conn.commit()
+
+                # Tables pour feedback et cas incertains
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS feedback (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT,
+                        timestamp DATETIME NOT NULL,
+                        image_filename TEXT,
+                        original_class TEXT,
+                        corrected_class TEXT,
+                        notes TEXT,
+                        prediction_id INTEGER
+                    )
+                """)
+
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS uncertain_cases (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT,
+                        timestamp DATETIME NOT NULL,
+                        image_filename TEXT,
+                        image_width INTEGER,
+                        image_height INTEGER,
+                        predictions_json TEXT,
+                        reason TEXT,
+                        min_confidence REAL,
+                        max_confidence REAL
+                    )
+                """)
     
     def save_prediction(
         self,
@@ -101,6 +130,77 @@ class Database:
                 ))
                 conn.commit()
                 return cursor.lastrowid or 0
+
+    def save_uncertain_case(
+        self,
+        user_id: Optional[str],
+        image_filename: Optional[str],
+        image_width: int,
+        image_height: int,
+        predictions: List[Dict[str, Any]],
+        reason: str,
+        min_confidence: float,
+        max_confidence: float
+    ) -> int:
+        """Enregistre un cas incertain pour annotation ultérieure."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute("""
+                    INSERT INTO uncertain_cases 
+                    (user_id, timestamp, image_filename, image_width, image_height, predictions_json, reason, min_confidence, max_confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id,
+                    datetime.utcnow().isoformat(),
+                    image_filename,
+                    image_width,
+                    image_height,
+                    json.dumps(predictions, ensure_ascii=False),
+                    reason,
+                    min_confidence,
+                    max_confidence
+                ))
+                conn.commit()
+                return cursor.lastrowid or 0
+
+    def list_uncertain_cases(self, limit: int = 100) -> List[Dict[str, Any]]:
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("""
+                    SELECT * FROM uncertain_cases 
+                    ORDER BY timestamp DESC 
+                    LIMIT ?
+                """, (limit,))
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    def save_feedback(
+        self,
+        user_id: Optional[str],
+        image_filename: Optional[str],
+        original_class: Optional[str],
+        corrected_class: str,
+        notes: Optional[str],
+        prediction_id: Optional[int]
+    ) -> int:
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute("""
+                    INSERT INTO feedback 
+                    (user_id, timestamp, image_filename, original_class, corrected_class, notes, prediction_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    user_id,
+                    datetime.utcnow().isoformat(),
+                    image_filename,
+                    original_class,
+                    corrected_class,
+                    notes,
+                    prediction_id
+                ))
+                conn.commit()
+                return cursor.lastrowid or 0
     
     def get_user_history(self, user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Récupère l'historique des prédictions d'un utilisateur."""
@@ -130,6 +230,17 @@ class Database:
                 
                 rows = cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    def list_users(self) -> List[str]:
+        """Liste des utilisateurs ayant des prédictions enregistrées."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("""
+                    SELECT DISTINCT user_id FROM predictions WHERE user_id IS NOT NULL ORDER BY user_id
+                """)
+                rows = cursor.fetchall()
+                return [row["user_id"] for row in rows]
     
     def save_performance_metric(
         self,

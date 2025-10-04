@@ -17,15 +17,19 @@ import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Union
 from PIL import Image
+import cv2
 
 
 # -----------------------------------------------------------------------------
 # Settings (must import first!)
 # -----------------------------------------------------------------------------
 from .settings import settings
+from .admin import router as admin_router
 from .database import db
 from .metrics import performance_monitor, monitor_performance, calculate_prediction_metrics
 
@@ -58,6 +62,13 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["*"],
 )
+
+# Templates & static (admin UI)
+templates = Jinja2Templates(directory="templates")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Routers
+app.include_router(admin_router)
 
 
 # -----------------------------------------------------------------------------
@@ -329,6 +340,8 @@ class PredictResponse(BaseModel):
     image_width: int
     image_height: int
     detected_classes: List[str]
+    uncertain: bool = False
+    quality: Dict[str, float] = {}
 
 
 class MultiImageDiagnosis(BaseModel):
@@ -401,7 +414,7 @@ def _pil_to_numpy(img: Image.Image) -> np.ndarray:
 # -----------------------------------------------------------------------------
 # Endpoints
 # -----------------------------------------------------------------------------
-@app.get("/health")
+@app.get("/health", tags=["system"], summary="Vérifier l'état du service")
 @monitor_performance("health_check")
 async def health() -> Dict[str, str]:
     """Vérification de santé du système avec métriques."""
@@ -412,7 +425,7 @@ async def health() -> Dict[str, str]:
     }
 
 
-@app.get("/classes", response_model=List[ClassItem])
+@app.get("/classes", response_model=List[ClassItem], tags=["model"], summary="Lister les classes du modèle")
 @monitor_performance("list_classes")
 async def list_classes() -> List[ClassItem]:
     """Liste toutes les classes de maladies détectables avec leurs recommandations."""
@@ -426,7 +439,7 @@ async def list_classes() -> List[ClassItem]:
     return result
 
 
-@app.post("/auth/login")
+@app.post("/auth/login", tags=["auth"], summary="Connexion et génération de token")
 @monitor_performance("auth_login")
 async def auth_login(username: str, password: str) -> Dict[str, object]:
     """Authentification utilisateur avec génération de token JWT."""
@@ -437,11 +450,11 @@ async def auth_login(username: str, password: str) -> Dict[str, object]:
     return {"access_token": token, "token_type": "bearer", "expires_in": settings.jwt_ttl_seconds}
 
 
-@app.post("/predict-multi", response_model=MultiImageDiagnosis)
+@app.post("/predict-multi", response_model=MultiImageDiagnosis, tags=["inference"], summary="Diagnostic multi-images d'une plante")
 @monitor_performance("predict_multi")
 async def predict_multi_images(
     plant_id: str,
-    images: List[UploadFile] = File(...),
+    images: list[UploadFile] = File(..., description="Jusqu'à 10 images de la même plante"),
     analysis_type: str = "comprehensive",
     user_id: Optional[str] = None,
     current_user: Optional[str] = Depends(get_current_user_id),
@@ -511,14 +524,13 @@ async def predict_multi_images(
         # Sauvegarder le diagnostic multi-images
         db.save_prediction(
             user_id=effective_user,
+            image_filename=None,
             image_width=0,  # Multi-images
             image_height=0,
             predictions=[],  # Résultats consolidés dans diagnosis
             processing_time_ms=processing_time_ms,
-            confidence_avg=sum(diagnosis.confidence_scores.values()) / len(diagnosis.confidence_scores) if diagnosis.confidence_scores else 0,
-            num_detections=diagnosis.total_detections,
-            plant_id=plant_id,
-            analysis_type=analysis_type
+            confidence_avg=sum(diagnosis.confidence_scores.values()) / len(diagnosis.confidence_scores) if diagnosis.confidence_scores else 0.0,
+            num_detections=diagnosis.total_detections
         )
         
         # Tracker les métriques
@@ -536,7 +548,7 @@ async def predict_multi_images(
     return diagnosis
 
 
-@app.post("/predict", response_model=PredictResponse)
+@app.post("/predict", response_model=PredictResponse, tags=["inference"], summary="Prédire sur une image unique")
 @monitor_performance("predict")
 async def predict(
     image: UploadFile = File(...),
@@ -549,6 +561,15 @@ async def predict(
     # Read and validate image
     img = _read_image_from_upload(image)
     np_img = _pil_to_numpy(img)
+
+    # Qualité d'image: flou (variance du Laplacien)
+    quality: Dict[str, float] = {}
+    try:
+        gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
+        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    except Exception:
+        lap_var = 0.0
+    quality["blur_variance"] = lap_var
 
     # Run inference
     model = get_model()
@@ -582,11 +603,30 @@ async def predict(
     processing_time_ms = int((time.time() - start_time) * 1000)
     prediction_metrics = calculate_prediction_metrics([p.dict() for p in predictions])
     
+    # Incertitude: seuils + qualité
+    max_conf = max([p.confidence for p in predictions], default=0.0)
+    min_conf = min([p.confidence for p in predictions], default=1.0) if predictions else 1.0
+    quality_ok = (lap_var >= settings.blur_variance_threshold) if settings.enable_quality_checks else True
+    uncertain = False
+    uncertain_reason = None
+    if settings.enable_uncertainty_routing:
+        if not predictions:
+            uncertain = True
+            uncertain_reason = "no_detection"
+        elif max_conf < settings.confidence_threshold_low:
+            uncertain = True
+            uncertain_reason = "low_confidence"
+        elif not quality_ok:
+            uncertain = True
+            uncertain_reason = "low_quality_blur"
+    
     response = PredictResponse(
         predictions=predictions,
         image_width=img.width,
         image_height=img.height,
         detected_classes=[names[i] for i in sorted(names.keys())] if isinstance(names, dict) else list(names),
+        uncertain=uncertain,
+        quality=quality,
     )
 
     # Sauvegarder en base de données
@@ -617,10 +657,69 @@ async def predict(
         logger.error(f"Failed to save prediction to database: {e}")
         # Ne pas faire échouer la prédiction si la sauvegarde échoue
 
+    # Enregistrer cas incertain pour annotation ultérieure
+    if uncertain:
+        try:
+            db.save_uncertain_case(
+                user_id=effective_user,
+                image_filename=image.filename,
+                image_width=img.width,
+                image_height=img.height,
+                predictions=[p.dict() for p in predictions],
+                reason=uncertain_reason or "uncertain",
+                min_confidence=min_conf,
+                max_confidence=max_conf,
+            )
+        except Exception as e:
+            logger.error(f"Failed to save uncertain case: {e}")
+
     return response
 
 
-@app.get("/history", response_model=List[HistoryItem])
+class FeedbackItem(BaseModel):
+    user_id: Optional[str] = None
+    image_filename: Optional[str] = None
+    original_class: Optional[str] = None
+    corrected_class: str
+    notes: Optional[str] = None
+    prediction_id: Optional[int] = None
+
+
+@app.post("/feedback", tags=["feedback"], summary="Soumettre un feedback de correction")
+@monitor_performance("post_feedback")
+async def post_feedback(item: FeedbackItem, current_user: Optional[str] = Depends(get_current_user_id)) -> Dict[str, Any]:
+    """Enregistre un feedback utilisateur pour correction de classe et annotation."""
+    effective_user = item.user_id or current_user
+    if not effective_user:
+        raise HTTPException(status_code=401, detail="Authentication required or provide user_id")
+    try:
+        feedback_id = db.save_feedback(
+            user_id=effective_user,
+            image_filename=item.image_filename,
+            original_class=item.original_class,
+            corrected_class=item.corrected_class,
+            notes=item.notes,
+            prediction_id=item.prediction_id,
+        )
+        return {"status": "ok", "feedback_id": feedback_id}
+    except Exception as e:
+        logger.error(f"Failed to save feedback: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save feedback")
+
+
+@app.get("/uncertain", tags=["feedback"], summary="Lister les cas incertains")
+@monitor_performance("list_uncertain")
+async def list_uncertain(limit: int = 100) -> Dict[str, Any]:
+    """Liste les cas incertains pour annotation."""
+    try:
+        rows = db.list_uncertain_cases(limit)
+        return {"items": rows, "count": len(rows)}
+    except Exception as e:
+        logger.error(f"Failed to list uncertain cases: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list uncertain cases")
+
+
+@app.get("/history", response_model=List[HistoryItem], tags=["history"], summary="Historique des prédictions d'un utilisateur")
 @monitor_performance("get_history")
 async def get_history(
     user_id: Optional[str] = None, 
@@ -654,7 +753,7 @@ async def get_history(
         raise HTTPException(status_code=500, detail="Failed to retrieve history")
 
 
-@app.post("/history", response_model=HistoryItem)
+@app.post("/history", response_model=HistoryItem, tags=["history"], summary="Ajouter un item d'historique manuellement")
 @monitor_performance("post_history")
 async def post_history(item: HistoryPost, current_user: Optional[str] = Depends(get_current_user_id)) -> HistoryItem:
     """Sauvegarde manuellement un historique de prédiction."""
@@ -694,7 +793,7 @@ async def post_history(item: HistoryPost, current_user: Optional[str] = Depends(
 # Nouveaux endpoints utiles
 # -----------------------------------------------------------------------------
 
-@app.get("/model/info")
+@app.get("/model/info", tags=["model"], summary="Informations sur le modèle")
 @monitor_performance("model_info")
 async def model_info() -> Dict[str, Any]:
     """Informations sur le modèle chargé."""
@@ -718,7 +817,7 @@ async def model_info() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to retrieve model information")
 
 
-@app.get("/stats/performance")
+@app.get("/stats/performance", tags=["stats"], summary="Statistiques de performance")
 @monitor_performance("performance_stats")
 async def performance_stats(hours: int = 24) -> Dict[str, Any]:
     """Statistiques de performance du système."""
@@ -736,7 +835,7 @@ async def performance_stats(hours: int = 24) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to retrieve performance statistics")
 
 
-@app.get("/stats/model-usage")
+@app.get("/stats/model-usage", tags=["stats"], summary="Statistiques d'usage du modèle")
 @monitor_performance("model_usage_stats")
 async def model_usage_stats(days: int = 7) -> Dict[str, Any]:
     """Statistiques d'utilisation du modèle."""
@@ -748,7 +847,7 @@ async def model_usage_stats(days: int = 7) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail="Failed to retrieve model usage statistics")
 
 
-@app.get("/stats/user/{user_id}")
+@app.get("/stats/user/{user_id}", tags=["stats"], summary="Statistiques par utilisateur")
 @monitor_performance("user_stats")
 async def user_stats(user_id: str, current_user: Optional[str] = Depends(get_current_user_id)) -> Dict[str, Any]:
     """Statistiques spécifiques à un utilisateur."""
@@ -812,7 +911,7 @@ async def user_stats(user_id: str, current_user: Optional[str] = Depends(get_cur
         raise HTTPException(status_code=500, detail="Failed to retrieve user statistics")
 
 
-@app.post("/admin/cleanup")
+@app.post("/admin/cleanup", tags=["admin"], summary="Nettoyage des anciennes données")
 @monitor_performance("admin_cleanup")
 async def admin_cleanup(days_to_keep: int = 30) -> Dict[str, str]:
     """Nettoyage des anciennes données (endpoint admin)."""
@@ -828,7 +927,7 @@ async def admin_cleanup(days_to_keep: int = 30) -> Dict[str, str]:
         raise HTTPException(status_code=500, detail="Failed to cleanup old data")
 
 
-@app.get("/admin/health-detailed")
+@app.get("/admin/health-detailed", tags=["admin"], summary="Santé détaillée du système")
 @monitor_performance("detailed_health")
 async def detailed_health() -> Dict[str, Any]:
     """Vérification de santé détaillée du système."""

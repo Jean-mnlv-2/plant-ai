@@ -1,0 +1,21 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h1 class="text-2xl font-semibold mb-4">Statistiques</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="bg-white rounded shadow p-4">
+    <h2 class="font-semibold mb-2">Performance (24h)</h2>
+    <pre class="text-xs whitespace-pre-wrap">{{ performance | tojson(indent=2) }}</pre>
+  </div>
+  <div class="bg-white rounded shadow p-4">
+    <h2 class="font-semibold mb-2">Usage modèle (7j)</h2>
+    <pre class="text-xs whitespace-pre-wrap">{{ usage | tojson(indent=2) }}</pre>
+  </div>
+</div>
+{% endblock %}
+
+
+
+
+
+

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title or 'Plant-AI Admin' }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="min-h-screen flex">
+    <aside class="w-64 bg-white border-r">
+      <div class="p-4 font-semibold">🌱 Plant-AI Admin</div>
+      <nav class="px-2 space-y-1">
+        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/">Dashboard</a>
+        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/uncertain">Incertains</a>
+        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/feedback">Feedback</a>
+        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/stats">Stats</a>
+        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/model">Modèle</a>
+        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/users">Utilisateurs</a>
+      </nav>
+    </aside>
+    <main class="flex-1 p-6">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>
+
+
+
