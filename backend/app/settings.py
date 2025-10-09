@@ -12,17 +12,33 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Plant-AI Backend Settings."""
     
+    # Autoriser des clés env supplémentaires (comme celles documentées dans env.example)
+    model_config = {
+        "extra": "ignore",
+        "env_prefix": "PLANT_AI_",
+        "env_file": ".env",
+        "protected_namespaces": ("settings_",)
+    }
+    
     # Application
     app_name: str = "Plant-AI Backend"
     app_version: str = "0.1.0"
 
     # Paths - Models and data
     models_dir: Path = Field(default=Path("models"))
-    model_file: Path = Field(default=Path("models/yolov8_best.pt"))
+    # Support legacy env var PLANT_AI_MODEL_PATH
+    model_file: Path = Field(default=Path(os.getenv("PLANT_AI_MODEL_PATH", "models/yolov8_best.pt")))
     jwt_secret_file: Path = Field(default=Path("models/.jwt_secret"))
-    db_path: Path = Field(default=Path("models/plant_ai.db"))
+    # Support legacy env var PLANT_AI_SQLITE_PATH and canonical PLANT_AI_DB_PATH
+    db_path: Path = Field(default=Path(os.getenv("PLANT_AI_DB_PATH", os.getenv("PLANT_AI_SQLITE_PATH", "data/plant_ai.db"))))
     uploads_dir: Path = Field(default=Path("data/uploads"))
     reports_dir: Path = Field(default=Path("reports"))
+    
+    # Model configuration
+    # Support legacy env var PLANT_AI_CONFIDENCE_THRESHOLD
+    model_confidence_threshold: float = Field(default=float(os.getenv("PLANT_AI_MODEL_CONFIDENCE_THRESHOLD", os.getenv("PLANT_AI_CONFIDENCE_THRESHOLD", "0.5"))), ge=0.0, le=1.0)
+    model_device: str = Field(default="cpu")  # cpu, cuda, mps
+    model_half_precision: bool = Field(default=False)
 
     # CORS for production - adjust these origins for production deployment
     allowed_origins: List[str] = Field(
@@ -82,11 +98,7 @@ class Settings(BaseSettings):
     )
     log_date_format: str = Field(default="%Y-%m-%d %H:%M:%S")
 
-    model_config = {
-        "env_prefix": "PLANT_AI_",
-        "env_file": ".env",
-        "protected_namespaces": ("settings_",)
-    }
+    # note: configuration déjà définie ci-dessus via model_config
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

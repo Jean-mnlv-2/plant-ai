@@ -1,41 +1,43 @@
+"""
+API Plant-AI - Backend principal avec toutes les nouvelles fonctionnalités.
+"""
 from __future__ import annotations
 
 import io
 import logging
 import threading
+import time
+import base64
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import base64
-import hashlib
-import hmac
-import json
-import os
-import time
-
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile, status, Depends
+from fastapi import FastAPI, File, HTTPException, UploadFile, status, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from typing import Union
 from PIL import Image
 import cv2
 
-
-# -----------------------------------------------------------------------------
-# Settings (must import first!)
-# -----------------------------------------------------------------------------
+# Imports locaux
 from .settings import settings
 from .admin import router as admin_router
 from .database import db
 from .metrics import performance_monitor, monitor_performance, calculate_prediction_metrics
-
+from .dataset_manager import dataset_manager
+from .models import *
+from .auth import (
+    create_user, authenticate_user, generate_tokens, get_current_user,
+    get_current_user_id, require_role, UserRole
+)
+from .weather_service import weather_service
+from .diseases_service import diseases_service
+from fastapi import Form
+from typing import Optional
 
 # -----------------------------------------------------------------------------
-# Logging setup (needs settings)
+# Logging setup
 # -----------------------------------------------------------------------------
 logger = logging.getLogger("plant_ai")
 logger.setLevel(getattr(logging, settings.log_level))
@@ -48,13 +50,18 @@ handler.setFormatter(formatter)
 if not logger.handlers:
     logger.addHandler(handler)
 
-
 # -----------------------------------------------------------------------------
 # FastAPI app
 # -----------------------------------------------------------------------------
-app = FastAPI(title=settings.app_name, version=settings.app_version)
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    description="API Plant-AI - Diagnostic intelligent des maladies des plantes",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
-# Enable CORS for PWA/mobile/web clients (production-ready configuration)
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
@@ -63,13 +70,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# -----------------------------------------------------------------------------
+# Basic health and root endpoints for quick connectivity tests
+# -----------------------------------------------------------------------------
+
+@app.get("/healthz", tags=["system"]) 
+def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/", tags=["system"]) 
+def root():
+    return {
+        "name": settings.app_name,
+        "version": settings.app_version,
+        "docs": "/docs",
+        "admin": "/admin/"
+    }
+
 # Templates & static (admin UI)
 templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static only if directory exists to avoid startup crash in dev
+static_dir = Path("static")
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Routers
 app.include_router(admin_router)
-
 
 # -----------------------------------------------------------------------------
 # Upload size limiting middleware
@@ -88,304 +115,130 @@ async def limit_upload_size(request: Request, call_next):
             pass
     return await call_next(request)
 
-
 # -----------------------------------------------------------------------------
 # Model loading (lazy, thread-safe)
 # -----------------------------------------------------------------------------
 _model_lock = threading.Lock()
-_model = None  # type: ignore[var-annotated]
+_model = None
 _model_path = settings.model_file
 
-
 def get_model():
+    """Get or load the YOLO model (thread-safe, lazy loading)."""
     global _model
     if _model is None:
         with _model_lock:
             if _model is None:
                 try:
-                    from ultralytics import YOLO  # import locally to speed cold startup
-                except Exception as e:  # pragma: no cover
-                    logger.exception("Ultralytics import failed")
-                    raise HTTPException(status_code=500, detail=f"Ultralytics import failed: {e}")
-
-                if not _model_path.exists():
+                    # Vérifier que le fichier modèle existe
+                    if not _model_path.exists():
+                        logger.error(f"Model file not found: {_model_path}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Model file not found: {_model_path}. Please train a model first."
+                        )
+                    
+                    from ultralytics import YOLO
+                    _model = YOLO(str(_model_path))
+                    try:
+                        device = settings.model_device
+                        if hasattr(_model, 'to') and device:
+                            _model = _model.to(device)
+                        # Apply half precision if requested and supported
+                        if settings.model_half_precision:
+                            try:
+                                import torch  # type: ignore
+                                if torch.cuda.is_available() and str(device).lower().startswith("cuda"):
+                                    if hasattr(_model, 'model') and hasattr(_model.model, 'half'):
+                                        _model.model.half()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    logger.info(f"Model loaded successfully from {_model_path}")
+                    
+                    # Vérifier que le modèle est valide
+                    if not hasattr(_model, 'names') or not _model.names:
+                        logger.error("Model loaded but has no classes")
+                        raise HTTPException(
+                            status_code=500,
+                            detail="Model loaded but has no classes. Please check the model file."
+                        )
+                    
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logger.error(f"Failed to load model: {e}")
                     raise HTTPException(
                         status_code=500,
-                        detail=f"Model file not found at '{_model_path.as_posix()}'. Train the model first.",
+                        detail=f"Model loading failed: {str(e)}"
                     )
-                try:
-                    logger.info("Loading YOLO model from %s", _model_path)
-                    _model = YOLO(str(_model_path))
-                except Exception as e:
-                    logger.exception("Model load failed")
-                    raise HTTPException(status_code=500, detail=f"Model load failed: {e}")
     return _model
 
+# =============================================================================
+# ADMIN DATASET ENDPOINTS (ported from legacy)
+# =============================================================================
+
+@app.get("/admin/dataset/status", tags=["admin", "dataset"]) 
+@monitor_performance("dataset_status")
+async def get_dataset_status() -> Dict[str, Any]:
+    return await dataset_manager.get_dataset_status()
 
 
-# -----------------------------------------------------------------------------
-# Minimal JWT (HS256) helpers
-# -----------------------------------------------------------------------------
-_JWT_SECRET_FILE = settings.jwt_secret_file
-if _JWT_SECRET_FILE.exists():
-    _JWT_SECRET = _JWT_SECRET_FILE.read_text(encoding="utf-8").strip()
-else:
-    _JWT_SECRET = os.getenv("PLANT_AI_JWT_SECRET", "dev-secret-change-me")
+@app.post("/admin/dataset/reset", tags=["admin", "dataset"]) 
+@monitor_performance("dataset_reset")
+async def reset_dataset_admin() -> Dict[str, Any]:
+    return await dataset_manager.reset_dataset()
 
 
-def _b64url(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+@app.post("/admin/dataset/process", tags=["admin", "dataset"]) 
+@monitor_performance("dataset_process")
+async def process_dataset_admin() -> Dict[str, Any]:
+    return await dataset_manager.process_dataset()
 
 
-def _sign(msg: bytes, secret: str) -> str:
-    sig = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).digest()
-    return _b64url(sig)
+@app.post("/admin/dataset/train", tags=["admin", "dataset"]) 
+@monitor_performance("dataset_train")
+async def train_model_admin(
+    epochs: int = Query(50, ge=1, le=1000),
+    batch_size: int = Query(16, ge=1, le=128),
+    image_size: int = Query(640, ge=320, le=1280)
+) -> Dict[str, Any]:
+    return await dataset_manager.train_model(epochs=epochs, batch_size=batch_size, image_size=image_size)
 
 
-def jwt_encode(payload: Dict[str, object], secret: str = _JWT_SECRET) -> str:
-    header = {"alg": "HS256", "typ": "JWT"}
-    header_b64 = _b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
-    payload_b64 = _b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
-    sig = _sign(signing_input, secret)
-    return f"{header_b64}.{payload_b64}.{sig}"
-
-
-def jwt_decode(token: str, secret: str = _JWT_SECRET) -> Dict[str, object]:
-    parts = token.split(".")
-    if len(parts) != 3:
-        raise HTTPException(status_code=401, detail="Invalid token format")
-    header_b64, payload_b64, sig = parts
-    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
-    expected = _sign(signing_input, secret)
-    if not hmac.compare_digest(sig, expected):
-        raise HTTPException(status_code=401, detail="Invalid token signature")
-    pad = "=" * (-len(payload_b64) % 4)
-    try:
-        payload_json = base64.urlsafe_b64decode((payload_b64 + pad).encode("ascii")).decode("utf-8")
-        payload = json.loads(payload_json)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-    exp = payload.get("exp")
-    if isinstance(exp, (int, float)) and int(time.time()) > int(exp):
-        raise HTTPException(status_code=401, detail="Token expired")
-    return payload  # type: ignore[return-value]
-
-
-def get_current_user_id(authorization: Optional[str] = None) -> Optional[str]:
-    if not authorization:
-        return None
-    if not authorization.lower().startswith("bearer "):
-        return None
-    token = authorization.split(" ", 1)[1]
-    payload = jwt_decode(token)
-    sub = payload.get("sub")
-    return str(sub) if sub is not None else None
-
-
-def _analyze_single_image(image_data: bytes) -> Dict:
-    """Analyse une seule image et retourne les résultats"""
-    try:
-        # Convertir bytes en PIL Image
-        img = Image.open(io.BytesIO(image_data))
-        np_img = _pil_to_numpy(img)
-        
-        # Run inference
-        model = get_model()
-        results = model.predict(source=[np_img], verbose=False)
-        
-        names: Dict[int, str] = getattr(model, "names", {})
-        predictions: List[Prediction] = []
-        
-        if results:
-            r = results[0]
-            if hasattr(r, "boxes") and r.boxes is not None:
-                xyxy = r.boxes.xyxy.cpu().numpy() if hasattr(r.boxes, "xyxy") else np.zeros((0, 4))
-                conf = r.boxes.conf.cpu().numpy() if hasattr(r.boxes, "conf") else np.zeros((0,))
-                cls = r.boxes.cls.cpu().numpy() if hasattr(r.boxes, "cls") else np.zeros((0,))
-                
-                for i in range(xyxy.shape[0]):
-                    bbox = xyxy[i].tolist()
-                    confidence = float(conf[i]) if i < conf.shape[0] else 0.0
-                    cls_id = int(cls[i]) if i < cls.shape[0] else 0
-                    class_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)
-                    recs = get_recommendations_for_class(class_name)
-                    predictions.append(
-                        Prediction(class_name=class_name, confidence=confidence, bbox=bbox, recommendations=recs)
-                    )
-        
-        return {
-            "image_width": img.width,
-            "image_height": img.height,
-            "predictions": [p.dict() for p in predictions],
-            "num_detections": len(predictions),
-            "diseases": list(set([p.class_name for p in predictions]))
-        }
-    except Exception as e:
-        logger.error(f"Erreur analyse image: {e}")
-        return {
-            "image_width": 0,
-            "image_height": 0,
-            "predictions": [],
-            "num_detections": 0,
-            "diseases": [],
-            "error": str(e)
-        }
-
-
-def _consolidate_diagnosis(image_results: List[Dict], plant_id: str) -> MultiImageDiagnosis:
-    """Consolide les résultats de plusieurs images en un diagnostic complet"""
+@app.post("/admin/dataset/upload", tags=["admin", "dataset"], response_model=None) 
+@monitor_performance("dataset_upload")
+async def upload_dataset_admin(
+    files: List[UploadFile] = File(..., description="Fichiers du dataset")
+) -> Dict[str, Any]:
+    # Séparer les fichiers par type
+    train_images = []
+    test_images = []
+    train_annotations = None
+    test_annotations = None
     
-    # Collecter toutes les maladies détectées
-    all_diseases = []
-    all_predictions = []
-    total_detections = 0
+    for file in files:
+        if file.filename.endswith('.jpg') or file.filename.endswith('.png'):
+            if 'train' in file.filename.lower():
+                train_images.append(file)
+            elif 'test' in file.filename.lower():
+                test_images.append(file)
+        elif file.filename.endswith('.csv'):
+            if 'train' in file.filename.lower():
+                train_annotations = file
+            elif 'test' in file.filename.lower():
+                test_annotations = file
     
-    for result in image_results:
-        if "error" not in result:
-            all_diseases.extend(result["diseases"])
-            all_predictions.extend(result["predictions"])
-            total_detections += result["num_detections"]
-    
-    # Calculer les scores de confiance par maladie
-    disease_confidence = {}
-    disease_recommendations = {}
-    
-    for pred in all_predictions:
-        disease = pred["class_name"]
-        confidence = pred["confidence"]
-        
-        if disease not in disease_confidence:
-            disease_confidence[disease] = []
-            disease_recommendations[disease] = set()
-        
-        disease_confidence[disease].append(confidence)
-        disease_recommendations[disease].update(pred["recommendations"])
-    
-    # Calculer la confiance moyenne par maladie
-    avg_confidence = {}
-    for disease, confidences in disease_confidence.items():
-        avg_confidence[disease] = sum(confidences) / len(confidences)
-    
-    # Déterminer le niveau de sévérité
-    max_confidence = max(avg_confidence.values()) if avg_confidence else 0
-    if max_confidence >= 0.8:
-        severity = "élevé"
-    elif max_confidence >= 0.6:
-        severity = "moyen"
-    else:
-        severity = "faible"
-    
-    # Générer le résumé du diagnostic
-    diseases_found = list(avg_confidence.keys())
-    if not diseases_found:
-        diagnostic_summary = "Aucune maladie détectée. La plante semble en bonne santé."
-    elif len(diseases_found) == 1:
-        disease = diseases_found[0]
-        confidence = avg_confidence[disease]
-        diagnostic_summary = f"Maladie détectée: {disease} (confiance: {confidence:.1%})"
-    else:
-        primary_disease = max(avg_confidence.items(), key=lambda x: x[1])
-        diagnostic_summary = f"Maladies multiples détectées. Principale: {primary_disease[0]} ({primary_disease[1]:.1%})"
-    
-    # Consolider les recommandations
-    all_recommendations = set()
-    for recommendations in disease_recommendations.values():
-        all_recommendations.update(recommendations)
-    
-    return MultiImageDiagnosis(
-        plant_id=plant_id,
-        images_analyzed=len(image_results),
-        total_detections=total_detections,
-        diseases_found=diseases_found,
-        confidence_scores=avg_confidence,
-        diagnostic_summary=diagnostic_summary,
-        recommendations=list(all_recommendations),
-        severity_level=severity,
-        image_results=image_results
+    return await dataset_manager.upload_dataset(
+        train_images=train_images,
+        test_images=test_images,
+        train_annotations=train_annotations,
+        test_annotations=test_annotations,
     )
 
-
-def get_recommendations_for_class(class_name: str) -> List[str]:
-    """Get agronomic recommendations for a detected class."""
-    return settings.class_to_recommendations.get(
-        class_name,
-        [
-            "Isoler la plante affectée",
-            "Observer l'évolution 48-72h", 
-            "Consulter un conseiller agronomique si aggravation",
-        ],
-    )
-
-
 # -----------------------------------------------------------------------------
-# Schemas
+# Utility functions
 # -----------------------------------------------------------------------------
-class BBox(BaseModel):
-    xmin: float
-    ymin: float
-    xmax: float
-    ymax: float
-
-
-class Prediction(BaseModel):
-    class_name: str = Field(..., description="Nom de la classe détectée")
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    bbox: List[float] = Field(..., min_length=4, max_length=4, description="[xmin, ymin, xmax, ymax]")
-    recommendations: List[str]
-
-
-class PredictResponse(BaseModel):
-    predictions: List[Prediction]
-    image_width: int
-    image_height: int
-    detected_classes: List[str]
-    uncertain: bool = False
-    quality: Dict[str, float] = {}
-
-
-class MultiImageDiagnosis(BaseModel):
-    """Diagnostic basé sur plusieurs images d'une même plante"""
-    plant_id: str = Field(..., description="Identifiant unique de la plante")
-    images_analyzed: int = Field(..., description="Nombre d'images analysées")
-    total_detections: int = Field(..., description="Nombre total de détections")
-    diseases_found: List[str] = Field(..., description="Maladies détectées")
-    confidence_scores: Dict[str, float] = Field(..., description="Scores de confiance par maladie")
-    diagnostic_summary: str = Field(..., description="Résumé du diagnostic")
-    recommendations: List[str] = Field(..., description="Recommandations consolidées")
-    severity_level: str = Field(..., description="Niveau de sévérité: faible/moyen/élevé")
-    image_results: List[Dict] = Field(..., description="Résultats détaillés par image")
-
-
-class MultiImageRequest(BaseModel):
-    """Requête pour analyse multi-images"""
-    plant_id: str = Field(..., description="Identifiant de la plante")
-    images: List[bytes] = Field(..., description="Images en base64")
-    analysis_type: str = Field(default="comprehensive", description="Type d'analyse")
-
-
-class ClassItem(BaseModel):
-    name: str
-    recommendations: List[str]
-
-
-class HistoryItem(BaseModel):
-    user_id: str
-    timestamp: datetime
-    predictions: List[Prediction]
-
-
-class HistoryPost(BaseModel):
-    user_id: str
-    predictions: List[Prediction]
-
-
-# -----------------------------------------------------------------------------
-# Database and performance monitoring (replaces in-memory storage)
-# -----------------------------------------------------------------------------
-# HISTORY is now handled by SQLite database
-
-
 def _read_image_from_upload(file: UploadFile) -> Image.Image:
     """Read and validate uploaded image file."""
     if file.content_type not in settings.allowed_content_types:
@@ -397,585 +250,675 @@ def _read_image_from_upload(file: UploadFile) -> Image.Image:
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
     try:
-        img = Image.open(io.BytesIO(data)).convert("RGB")
+        return Image.open(io.BytesIO(data))
     except Exception as e:
-        logger.error(f"Failed to open image: {e}")
-        raise HTTPException(status_code=400, detail="Invalid image file")
-    return img
+        raise HTTPException(status_code=400, detail=f"Invalid image: {str(e)}")
 
+def _pil_to_numpy(pil_image: Image.Image) -> np.ndarray:
+    """Convert PIL Image to numpy array."""
+    return np.array(pil_image)
 
-def _pil_to_numpy(img: Image.Image) -> np.ndarray:
-    arr = np.array(img)
-    if arr.ndim != 3 or arr.shape[2] != 3:
-        raise HTTPException(status_code=400, detail="Image must be RGB")
-    return arr
+def _process_image_for_yolo(image: Image.Image) -> np.ndarray:
+    """Process image for YOLO inference."""
+    # Convert to RGB if needed
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+    
+    # Convert to numpy array
+    img_array = _pil_to_numpy(image)
+    
+    return img_array
 
+def _generate_diagnostic_id() -> str:
+    """Generate unique diagnostic ID."""
+    return f"diag_{int(time.time() * 1000)}"
 
 # -----------------------------------------------------------------------------
-# Endpoints
+# API Endpoints
 # -----------------------------------------------------------------------------
-@app.get("/health", tags=["system"], summary="Vérifier l'état du service")
-@monitor_performance("health_check")
-async def health() -> Dict[str, str]:
-    """Vérification de santé du système avec métriques."""
+
+# =============================================================================
+# AUTHENTICATION APIs
+# =============================================================================
+
+@app.post("/api/v1/auth/register", response_model=AuthResponse, tags=["auth"])
+@monitor_performance
+def register_user(user_data: UserRegister):
+    """Créer un nouveau compte utilisateur."""
+    try:
+        # Créer l'utilisateur
+        user = create_user(
+            name=user_data.name,
+            email=user_data.email,
+            password=user_data.password,
+            country=user_data.country,
+            role=user_data.role
+        )
+        
+        # Générer les tokens
+        tokens = generate_tokens(user.id, user.role)
+        
+        return AuthResponse(
+            success=True,
+            user=user,
+            tokens=tokens
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration error: {e}")
+        raise HTTPException(status_code=500, detail="Registration failed")
+
+@app.post("/api/v1/auth/login", response_model=AuthResponse, tags=["auth"])
+@monitor_performance
+def login_user(login_data: UserLogin):
+    """Connexion utilisateur."""
+    try:
+        # Authentifier l'utilisateur
+        user = authenticate_user(login_data.email, login_data.password)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password"
+            )
+        
+        # Générer les tokens
+        tokens = generate_tokens(user.id, user.role)
+        
+        return AuthResponse(
+            success=True,
+            user=user,
+            tokens=tokens
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+
+# Endpoint legacy pour compatibilité avec les tests
+@app.post("/auth/login", tags=["auth", "legacy"])
+@monitor_performance
+def login_user_legacy(login_data: UserLogin):
+    """Connexion utilisateur (endpoint legacy)."""
+    return login_user(login_data)
+
+@app.post("/api/v1/auth/refresh", response_model=Tokens, tags=["auth"])
+@monitor_performance
+def refresh_token(refresh_data: TokenRefresh):
+    """Renouveler le token d'accès."""
+    try:
+        from .auth import jwt_decode
+        payload = jwt_decode(refresh_data.refreshToken)
+        
+        if payload.get("type") != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token"
+            )
+        
+        user_id = payload.get("sub")
+        user_data = db.get_user_by_id(user_id)
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Générer nouveaux tokens
+        tokens = generate_tokens(user_id, UserRole(user_data["role"]))
+        
+        return tokens
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token refresh error: {e}")
+        raise HTTPException(status_code=500, detail="Token refresh failed")
+
+# =============================================================================
+# DIAGNOSTIC APIs
+# =============================================================================
+
+@app.post("/api/v1/diagnose", response_model=DiagnoseResponse, tags=["diagnostic"])
+@monitor_performance
+def diagnose_plant_images(
+    request: DiagnoseRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Analyser des images de plantes pour diagnostiquer les maladies."""
+    try:
+        start_time = time.time()
+        diagnostic_id = _generate_diagnostic_id()
+        
+        # Traiter chaque image
+        results = []
+        overall_confidences = []
+        
+        for i, image_base64 in enumerate(request.images):
+            try:
+                # Décoder l'image base64
+                image_data = base64.b64decode(image_base64.split(',')[1] if ',' in image_base64 else image_base64)
+                image = Image.open(io.BytesIO(image_data))
+                
+                # Traiter l'image
+                img_array = _process_image_for_yolo(image)
+                model = get_model()
+                predictions = model(img_array, conf=settings.model_confidence_threshold)
+                
+                # Analyser les résultats
+                if predictions and len(predictions) > 0:
+                    pred = predictions[0]
+                    if pred.boxes is not None and len(pred.boxes) > 0:
+                        # Prendre la détection avec la plus haute confiance
+                        best_detection = pred.boxes[0]
+                        confidence = float(best_detection.conf[0])
+                        class_id = int(best_detection.cls[0])
+                        class_name = model.names[class_id]
+                        
+                        # Créer le résultat
+                        disease = Disease(
+                            id=f"{class_name.lower().replace(' ', '-')}",
+                            name=class_name,
+                            confidence=confidence * 100,
+                            severity=SeverityLevel.HIGH if confidence > 0.8 else SeverityLevel.MEDIUM,
+                            category="diseases"
+                        )
+                        
+                        # Générer des recommandations basées sur la maladie
+                        recommendations = _get_disease_recommendations(class_name)
+                        
+                        result = ImageResult(
+                            imageIndex=i,
+                            disease=disease,
+                            symptoms=recommendations.get("symptoms", []),
+                            solutions=recommendations.get("solutions", []),
+                            prevention=recommendations.get("prevention", []),
+                            treatmentUrgency=TreatmentUrgency.IMMEDIATE if confidence > 0.8 else TreatmentUrgency.URGENT,
+                            affectedArea=0.75  # Estimation
+                        )
+                        
+                        results.append(result)
+                        overall_confidences.append(confidence * 100)
+                    else:
+                        # Aucune détection
+                        disease = Disease(
+                            id="healthy",
+                            name="Plante saine",
+                            confidence=95.0,
+                            severity=SeverityLevel.LOW,
+                            category="healthy"
+                        )
+                        
+                        result = ImageResult(
+                            imageIndex=i,
+                            disease=disease,
+                            symptoms=[],
+                            solutions=["Continuer les soins habituels"],
+                            prevention=["Maintenir de bonnes pratiques culturales"],
+                            treatmentUrgency=TreatmentUrgency.MONITORING,
+                            affectedArea=0.0
+                        )
+                        
+                        results.append(result)
+                        overall_confidences.append(95.0)
+                else:
+                    # Aucune prédiction
+                    disease = Disease(
+                        id="unknown",
+                        name="Diagnostic incertain",
+                        confidence=50.0,
+                        severity=SeverityLevel.LOW,
+                        category="unknown"
+                    )
+                    
+                    result = ImageResult(
+                        imageIndex=i,
+                        disease=disease,
+                        symptoms=[],
+                        solutions=["Consulter un expert"],
+                        prevention=[],
+                        treatmentUrgency=TreatmentUrgency.MONITORING,
+                        affectedArea=0.0
+                    )
+                    
+                    results.append(result)
+                    overall_confidences.append(50.0)
+                    
+            except Exception as e:
+                logger.error(f"Error processing image {i}: {e}")
+                # Créer un résultat d'erreur
+                disease = Disease(
+                    id="error",
+                    name="Erreur de traitement",
+                    confidence=0.0,
+                    severity=SeverityLevel.LOW,
+                    category="error"
+                )
+                
+                result = ImageResult(
+                    imageIndex=i,
+                    disease=disease,
+                    symptoms=[],
+                    solutions=["Vérifier la qualité de l'image"],
+                    prevention=[],
+                    treatmentUrgency=TreatmentUrgency.MONITORING,
+                    affectedArea=0.0
+                )
+                
+                results.append(result)
+                overall_confidences.append(0.0)
+        
+        # Calculer la confiance globale
+        overall_confidence = sum(overall_confidences) / len(overall_confidences) if overall_confidences else 0.0
+        
+        # Générer des recommandations globales
+        recommendations = _generate_global_recommendations(results)
+        
+        # Sauvegarder le diagnostic
+        diagnostic_data = {
+            "id": diagnostic_id,
+            "userId": current_user.id,
+            "images": request.images,
+            "results": [result.dict() for result in results],
+            "location": request.location.dict(),
+            "plantType": request.plantType,
+            "status": "completed",
+            "createdAt": datetime.utcnow()
+        }
+        db.save_diagnostic(diagnostic_data)
+        
+        processing_time = time.time() - start_time
+        
+        return DiagnoseResponse(
+            success=True,
+            diagnosticId=diagnostic_id,
+            results=results,
+            overallConfidence=overall_confidence,
+            processingTime=processing_time,
+            timestamp=datetime.utcnow(),
+            recommendations=recommendations
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Diagnostic error: {e}")
+        raise HTTPException(status_code=500, detail="Diagnostic failed")
+
+# =============================================================================
+# DIAGNOSTICS MANAGEMENT APIs
+# =============================================================================
+
+@app.get("/api/v1/diagnostics", response_model=DiagnosticsListResponse, tags=["diagnostics"])
+@monitor_performance
+def get_diagnostics(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    sortBy: str = Query("created_at", regex="^(created_at|updated_at)$"),
+    order: str = Query("desc", regex="^(asc|desc)$"),
+    current_user: User = Depends(get_current_user)
+):
+    """Récupérer l'historique des diagnostics d'un utilisateur."""
+    try:
+        result = db.get_diagnostics(
+            user_id=current_user.id,
+            limit=limit,
+            offset=offset,
+            sort_by=sortBy,
+            order=order
+        )
+        return DiagnosticsListResponse(**result)
+    except Exception as e:
+        logger.error(f"Get diagnostics error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve diagnostics")
+
+@app.get("/api/v1/diagnostics/{diagnostic_id}", tags=["diagnostics"])
+@monitor_performance
+def get_diagnostic_by_id(
+    diagnostic_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Récupérer un diagnostic spécifique."""
+    try:
+        diagnostic = db.get_diagnostic_by_id(diagnostic_id)
+        if not diagnostic:
+            raise HTTPException(status_code=404, detail="Diagnostic not found")
+        
+        # Vérifier que l'utilisateur peut accéder à ce diagnostic
+        if diagnostic["userId"] != current_user.id and current_user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        return {"success": True, "diagnostic": diagnostic}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get diagnostic error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve diagnostic")
+
+@app.post("/api/v1/diagnostics/sync", tags=["diagnostics"])
+@monitor_performance
+def sync_diagnostics(
+    sync_request: SyncRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Synchroniser les diagnostics créés hors ligne."""
+    try:
+        synced_count = 0
+        for diagnostic in sync_request.diagnostics:
+            # Générer un nouvel ID pour éviter les conflits
+            new_id = _generate_diagnostic_id()
+            
+            diagnostic_data = {
+                "id": new_id,
+                "userId": current_user.id,
+                "images": diagnostic.images,
+                "results": diagnostic.results,
+                "location": diagnostic.location.dict(),
+                "plantType": "unknown",
+                "status": "completed",
+                "createdAt": diagnostic.timestamp
+            }
+            
+            db.save_diagnostic(diagnostic_data)
+            synced_count += 1
+        
+        return {
+            "success": True,
+            "syncedCount": synced_count,
+            "message": f"Successfully synced {synced_count} diagnostics"
+        }
+    except Exception as e:
+        logger.error(f"Sync diagnostics error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to sync diagnostics")
+
+# =============================================================================
+# WEATHER APIs
+# =============================================================================
+
+@app.get("/api/v1/weather", response_model=WeatherResponse, tags=["weather"])
+@monitor_performance
+def get_weather_data(
+    lat: float = Query(..., ge=-90, le=90),
+    lng: float = Query(..., ge=-180, le=180),
+    includeForecast: bool = Query(True),
+    current_user: User = Depends(get_current_user)
+):
+    """Récupérer les données météo agricoles."""
+    try:
+        return weather_service.get_weather_data(lat, lng, includeForecast)
+    except Exception as e:
+        logger.error(f"Weather data error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve weather data")
+
+# =============================================================================
+# DISEASES KNOWLEDGE BASE APIs
+# =============================================================================
+
+@app.get("/api/v1/diseases", response_model=DiseasesListResponse, tags=["diseases"])
+@monitor_performance
+def search_diseases(
+    search: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user)
+):
+    """Rechercher des maladies dans la base de connaissances."""
+    try:
+        result = diseases_service.search_diseases(search, category, limit, offset)
+        return DiseasesListResponse(**result)
+    except Exception as e:
+        logger.error(f"Search diseases error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to search diseases")
+
+@app.get("/api/v1/diseases/{disease_id}", tags=["diseases"])
+@monitor_performance
+def get_disease_by_id(
+    disease_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Récupérer les détails d'une maladie spécifique."""
+    try:
+        disease = diseases_service.get_disease_by_id(disease_id)
+        if not disease:
+            raise HTTPException(status_code=404, detail="Disease not found")
+        
+        return {"success": True, "disease": disease}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get disease error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve disease")
+
+# =============================================================================
+# USER MANAGEMENT APIs
+# =============================================================================
+
+@app.get("/api/v1/users/profile", response_model=UserProfileResponse, tags=["users"])
+@monitor_performance
+def get_user_profile(current_user: User = Depends(get_current_user)):
+    """Récupérer le profil de l'utilisateur connecté."""
+    try:
+        # Récupérer les statistiques de l'utilisateur
+        user_stats = db.get_user_stats(current_user.id)
+        
+        profile = UserProfile(
+            id=current_user.id,
+            name=current_user.name,
+            email=current_user.email,
+            country=current_user.country,
+            role=current_user.role,
+            preferences=UserPreferences(**current_user.preferences) if current_user.preferences else UserPreferences(),
+            stats=user_stats
+        )
+        
+        return UserProfileResponse(success=True, user=profile)
+    except Exception as e:
+        logger.error(f"Get user profile error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve user profile")
+
+# =============================================================================
+# LEGACY APIs (pour compatibilité)
+# =============================================================================
+
+@app.get("/health", tags=["system"])
+@monitor_performance
+def health_check():
+    """Vérifier l'état du service."""
     return {
-        "status": "ok",
-        "timestamp": datetime.utcnow().isoformat(),
-        "version": settings.app_version
+        "status": "healthy",
+        "timestamp": datetime.utcnow(),
+        "version": settings.app_version,
+        "model_loaded": _model is not None
     }
 
-
-@app.get("/classes", response_model=List[ClassItem], tags=["model"], summary="Lister les classes du modèle")
-@monitor_performance("list_classes")
-async def list_classes() -> List[ClassItem]:
-    """Liste toutes les classes de maladies détectables avec leurs recommandations."""
-    model = get_model()
-    names: Dict[int, str] = getattr(model, "names", {})  # type: ignore[assignment]
-    # Ultralytics names is usually id->name dict
-    class_names = [names[i] for i in sorted(names.keys())] if isinstance(names, dict) else list(names)
-    result: List[ClassItem] = []
-    for c in class_names:
-        result.append(ClassItem(name=c, recommendations=get_recommendations_for_class(c)))
-    return result
-
-
-@app.post("/auth/login", tags=["auth"], summary="Connexion et génération de token")
-@monitor_performance("auth_login")
-async def auth_login(username: str, password: str) -> Dict[str, object]:
-    """Authentification utilisateur avec génération de token JWT."""
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="Username and password required")
-    now = int(time.time())
-    token = jwt_encode({"sub": username, "iat": now, "exp": now + settings.jwt_ttl_seconds})
-    return {"access_token": token, "token_type": "bearer", "expires_in": settings.jwt_ttl_seconds}
-
-
-@app.post("/predict-multi", response_model=MultiImageDiagnosis, tags=["inference"], summary="Diagnostic multi-images d'une plante")
-@monitor_performance("predict_multi")
-async def predict_multi_images(
-    plant_id: str,
-    images: list[UploadFile] = File(..., description="Jusqu'à 10 images de la même plante"),
-    analysis_type: str = "comprehensive",
-    user_id: Optional[str] = None,
-    current_user: Optional[str] = Depends(get_current_user_id),
-):
-    """
-    Analyse plusieurs images d'une même plante pour un diagnostic complet.
-    
-    - **plant_id**: Identifiant unique de la plante
-    - **images**: Liste d'images (feuilles, tiges, fruits, etc.)
-    - **analysis_type**: Type d'analyse (comprehensive, quick, detailed)
-    
-    Retourne un diagnostic consolidé avec:
-    - Maladies détectées avec scores de confiance
-    - Niveau de sévérité
-    - Recommandations consolidées
-    - Résumé du diagnostic
-    """
-    start_time = time.time()
-    
-    if len(images) < 1:
-        raise HTTPException(status_code=400, detail="Au moins une image est requise")
-    
-    if len(images) > 10:
-        raise HTTPException(status_code=400, detail="Maximum 10 images par analyse")
-    
-    # Analyser chaque image
-    image_results = []
-    for i, image in enumerate(images):
-        try:
-            # Lire l'image
-            image_data = await image.read()
-            
-            # Valider le type de contenu
-            if image.content_type not in settings.allowed_content_types:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Type de fichier non supporté: {image.content_type}"
-                )
-            
-            # Analyser l'image
-            result = _analyze_single_image(image_data)
-            result["image_index"] = i
-            result["filename"] = image.filename or f"image_{i}.jpg"
-            image_results.append(result)
-            
-        except Exception as e:
-            logger.error(f"Erreur analyse image {i}: {e}")
-            image_results.append({
-                "image_index": i,
-                "filename": image.filename or f"image_{i}.jpg",
-                "error": str(e),
-                "predictions": [],
-                "num_detections": 0,
-                "diseases": []
-            })
-    
-    # Consolider le diagnostic
-    diagnosis = _consolidate_diagnosis(image_results, plant_id)
-    
-    # Calculer les métriques de performance
-    processing_time_ms = int((time.time() - start_time) * 1000)
-    
-    # Sauvegarder en base de données
-    effective_user = user_id or current_user or "anonymous"
-    
-    try:
-        # Sauvegarder le diagnostic multi-images
-        db.save_prediction(
-            user_id=effective_user,
-            image_filename=None,
-            image_width=0,  # Multi-images
-            image_height=0,
-            predictions=[],  # Résultats consolidés dans diagnosis
-            processing_time_ms=processing_time_ms,
-            confidence_avg=sum(diagnosis.confidence_scores.values()) / len(diagnosis.confidence_scores) if diagnosis.confidence_scores else 0.0,
-            num_detections=diagnosis.total_detections
-        )
-        
-        # Tracker les métriques
-        performance_monitor.track_prediction_metrics(
-            user_id=effective_user,
-            num_detections=diagnosis.total_detections,
-            avg_confidence=sum(diagnosis.confidence_scores.values()) / len(diagnosis.confidence_scores) if diagnosis.confidence_scores else 0,
-            processing_time_ms=processing_time_ms
-        )
-        
-    except Exception as e:
-        logger.error(f"Erreur sauvegarde diagnostic multi-images: {e}")
-    
-    logger.info(f"Diagnostic multi-images terminé pour {plant_id}: {diagnosis.diseases_found}")
-    return diagnosis
-
-
-@app.post("/predict", response_model=PredictResponse, tags=["inference"], summary="Prédire sur une image unique")
-@monitor_performance("predict")
-async def predict(
-    image: UploadFile = File(...),
-    user_id: Optional[str] = None,
-    current_user: Optional[str] = Depends(get_current_user_id),
-):
-    """Prédiction principale avec métriques de performance et sauvegarde en base."""
-    start_time = time.time()
-    
-    # Read and validate image
-    img = _read_image_from_upload(image)
-    np_img = _pil_to_numpy(img)
-
-    # Qualité d'image: flou (variance du Laplacien)
-    quality: Dict[str, float] = {}
-    try:
-        gray = cv2.cvtColor(np_img, cv2.COLOR_RGB2GRAY)
-        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-    except Exception:
-        lap_var = 0.0
-    quality["blur_variance"] = lap_var
-
-    # Run inference
-    model = get_model()
-    try:
-        results = model.predict(source=[np_img], verbose=False)  # batch of one
-    except Exception as e:  # pragma: no cover
-        logger.exception("Inference failed")
-        raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
-
-    names: Dict[int, str] = getattr(model, "names", {})  # type: ignore[assignment]
-    predictions: List[Prediction] = []
-
-    if results:
-        r = results[0]
-        # Boxes in xyxy format
-        if hasattr(r, "boxes") and r.boxes is not None:
-            xyxy = r.boxes.xyxy.cpu().numpy() if hasattr(r.boxes, "xyxy") else np.zeros((0, 4))
-            conf = r.boxes.conf.cpu().numpy() if hasattr(r.boxes, "conf") else np.zeros((0,))
-            cls = r.boxes.cls.cpu().numpy() if hasattr(r.boxes, "cls") else np.zeros((0,))
-            for i in range(xyxy.shape[0]):
-                bbox = xyxy[i].tolist()
-                confidence = float(conf[i]) if i < conf.shape[0] else 0.0
-                cls_id = int(cls[i]) if i < cls.shape[0] else 0
-                class_name = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)
-                recs = get_recommendations_for_class(class_name)
-                predictions.append(
-                    Prediction(class_name=class_name, confidence=confidence, bbox=bbox, recommendations=recs)
-                )
-
-    # Calculer les métriques de performance
-    processing_time_ms = int((time.time() - start_time) * 1000)
-    prediction_metrics = calculate_prediction_metrics([p.dict() for p in predictions])
-    
-    # Incertitude: seuils + qualité
-    max_conf = max([p.confidence for p in predictions], default=0.0)
-    min_conf = min([p.confidence for p in predictions], default=1.0) if predictions else 1.0
-    quality_ok = (lap_var >= settings.blur_variance_threshold) if settings.enable_quality_checks else True
-    uncertain = False
-    uncertain_reason = None
-    if settings.enable_uncertainty_routing:
-        if not predictions:
-            uncertain = True
-            uncertain_reason = "no_detection"
-        elif max_conf < settings.confidence_threshold_low:
-            uncertain = True
-            uncertain_reason = "low_confidence"
-        elif not quality_ok:
-            uncertain = True
-            uncertain_reason = "low_quality_blur"
-    
-    response = PredictResponse(
-        predictions=predictions,
-        image_width=img.width,
-        image_height=img.height,
-        detected_classes=[names[i] for i in sorted(names.keys())] if isinstance(names, dict) else list(names),
-        uncertain=uncertain,
-        quality=quality,
-    )
-
-    # Sauvegarder en base de données
-    effective_user = user_id or current_user or "anonymous"
-    try:
-        prediction_id = db.save_prediction(
-            user_id=effective_user,
-            image_filename=image.filename,
-            image_width=img.width,
-            image_height=img.height,
-            predictions=[p.dict() for p in predictions],
-            processing_time_ms=processing_time_ms,
-            confidence_avg=prediction_metrics["avg_confidence"],
-            num_detections=prediction_metrics["num_detections"]
-        )
-        
-        # Mettre à jour les métriques en mémoire
-        performance_monitor.track_prediction_metrics(
-            user_id=effective_user,
-            num_detections=prediction_metrics["num_detections"],
-            avg_confidence=prediction_metrics["avg_confidence"],
-            processing_time_ms=processing_time_ms
-        )
-        
-        logger.info(f"Prediction saved with ID {prediction_id} for user {effective_user}")
-        
-    except Exception as e:
-        logger.error(f"Failed to save prediction to database: {e}")
-        # Ne pas faire échouer la prédiction si la sauvegarde échoue
-
-    # Enregistrer cas incertain pour annotation ultérieure
-    if uncertain:
-        try:
-            db.save_uncertain_case(
-                user_id=effective_user,
-                image_filename=image.filename,
-                image_width=img.width,
-                image_height=img.height,
-                predictions=[p.dict() for p in predictions],
-                reason=uncertain_reason or "uncertain",
-                min_confidence=min_conf,
-                max_confidence=max_conf,
-            )
-        except Exception as e:
-            logger.error(f"Failed to save uncertain case: {e}")
-
-    return response
-
-
-class FeedbackItem(BaseModel):
-    user_id: Optional[str] = None
-    image_filename: Optional[str] = None
-    original_class: Optional[str] = None
-    corrected_class: str
-    notes: Optional[str] = None
-    prediction_id: Optional[int] = None
-
-
-@app.post("/feedback", tags=["feedback"], summary="Soumettre un feedback de correction")
-@monitor_performance("post_feedback")
-async def post_feedback(item: FeedbackItem, current_user: Optional[str] = Depends(get_current_user_id)) -> Dict[str, Any]:
-    """Enregistre un feedback utilisateur pour correction de classe et annotation."""
-    effective_user = item.user_id or current_user
-    if not effective_user:
-        raise HTTPException(status_code=401, detail="Authentication required or provide user_id")
-    try:
-        feedback_id = db.save_feedback(
-            user_id=effective_user,
-            image_filename=item.image_filename,
-            original_class=item.original_class,
-            corrected_class=item.corrected_class,
-            notes=item.notes,
-            prediction_id=item.prediction_id,
-        )
-        return {"status": "ok", "feedback_id": feedback_id}
-    except Exception as e:
-        logger.error(f"Failed to save feedback: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save feedback")
-
-
-@app.get("/uncertain", tags=["feedback"], summary="Lister les cas incertains")
-@monitor_performance("list_uncertain")
-async def list_uncertain(limit: int = 100) -> Dict[str, Any]:
-    """Liste les cas incertains pour annotation."""
-    try:
-        rows = db.list_uncertain_cases(limit)
-        return {"items": rows, "count": len(rows)}
-    except Exception as e:
-        logger.error(f"Failed to list uncertain cases: {e}")
-        raise HTTPException(status_code=500, detail="Failed to list uncertain cases")
-
-
-@app.get("/history", response_model=List[HistoryItem], tags=["history"], summary="Historique des prédictions d'un utilisateur")
-@monitor_performance("get_history")
-async def get_history(
-    user_id: Optional[str] = None, 
-    current_user: Optional[str] = Depends(get_current_user_id),
-    limit: int = 100
-) -> List[HistoryItem]:
-    """Récupère l'historique des prédictions d'un utilisateur depuis la base de données."""
-    effective_user = user_id or current_user
-    if not effective_user:
-        raise HTTPException(status_code=401, detail="Authentication required or provide user_id")
-    
-    try:
-        history_data = db.get_user_history(effective_user, limit)
-        history_items = []
-        
-        for row in history_data:
-            predictions_data = json.loads(row["predictions_json"])
-            predictions = [Prediction(**p) for p in predictions_data]
-            
-            history_item = HistoryItem(
-                user_id=row["user_id"],
-                timestamp=datetime.fromisoformat(row["timestamp"]),
-                predictions=predictions
-            )
-            history_items.append(history_item)
-        
-        return history_items
-        
-    except Exception as e:
-        logger.error(f"Failed to retrieve history for user {effective_user}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve history")
-
-
-@app.post("/history", response_model=HistoryItem, tags=["history"], summary="Ajouter un item d'historique manuellement")
-@monitor_performance("post_history")
-async def post_history(item: HistoryPost, current_user: Optional[str] = Depends(get_current_user_id)) -> HistoryItem:
-    """Sauvegarde manuellement un historique de prédiction."""
-    effective_user = item.user_id or current_user
-    if not effective_user:
-        raise HTTPException(status_code=401, detail="Authentication required or provide user_id")
-    
-    try:
-        # Sauvegarder en base de données
-        prediction_metrics = calculate_prediction_metrics([p.dict() for p in item.predictions])
-        
-        prediction_id = db.save_prediction(
-            user_id=effective_user,
-            image_filename=None,
-            image_width=0,
-            image_height=0,
-            predictions=[p.dict() for p in item.predictions],
-            processing_time_ms=0,
-            confidence_avg=prediction_metrics["avg_confidence"],
-            num_detections=prediction_metrics["num_detections"]
-        )
-        
-        history_item = HistoryItem(
-            user_id=effective_user, 
-            timestamp=datetime.utcnow(), 
-            predictions=item.predictions
-        )
-        
-        return history_item
-        
-    except Exception as e:
-        logger.error(f"Failed to save history for user {effective_user}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save history")
-
-
-# -----------------------------------------------------------------------------
-# Nouveaux endpoints utiles
-# -----------------------------------------------------------------------------
-
-@app.get("/model/info", tags=["model"], summary="Informations sur le modèle")
-@monitor_performance("model_info")
-async def model_info() -> Dict[str, Any]:
+@app.get("/model/info", tags=["model"])
+@monitor_performance
+def get_model_info():
     """Informations sur le modèle chargé."""
     try:
         model = get_model()
-        names: Dict[int, str] = getattr(model, "names", {})
-        class_names = [names[i] for i in sorted(names.keys())] if isinstance(names, dict) else list(names)
-        
         return {
-            "model_path": str(settings.model_file),
-            "model_exists": settings.model_file.exists(),
-            "classes": class_names,
-            "num_classes": len(class_names),
-            "input_size": 640,
-            "confidence_threshold": 0.5,
-            "supported_formats": settings.allowed_content_types,
-            "max_upload_size_mb": settings.max_upload_bytes // (1024 * 1024)
+            "model_path": str(_model_path),
+            "model_exists": _model_path.exists(),
+            "max_upload_bytes": settings.max_upload_bytes,
+            "classes": list(model.names.values()) if model else [],
+            "num_classes": len(model.names) if model else 0
         }
     except Exception as e:
-        logger.error(f"Failed to get model info: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve model information")
+        logger.error(f"Model info error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get model info")
 
-
-@app.get("/stats/performance", tags=["stats"], summary="Statistiques de performance")
-@monitor_performance("performance_stats")
-async def performance_stats(hours: int = 24) -> Dict[str, Any]:
-    """Statistiques de performance du système."""
+@app.get("/classes", response_model=List[ClassItem], tags=["model"])
+@monitor_performance
+def get_classes():
+    """Lister les classes du modèle."""
     try:
-        stats = db.get_performance_stats(hours)
-        global_metrics = performance_monitor.get_global_metrics()
+        model = get_model()
+        classes = []
+        for class_id, class_name in model.names.items():
+            recommendations = _get_disease_recommendations(class_name)
+            classes.append(ClassItem(
+                name=class_name,
+                recommendations=recommendations.get("solutions", [])
+            ))
+        return classes
+    except Exception as e:
+        logger.error(f"Get classes error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve classes")
+
+@app.post("/predict", response_model=PredictResponse, tags=["inference"])
+@monitor_performance
+def predict_single_image(
+    file: UploadFile = File(...),
+    user_id: str = "anonymous"
+):
+    """Prédire sur une image unique (API legacy)."""
+    try:
+        # Lire l'image
+        image = _read_image_from_upload(file)
+        img_array = _process_image_for_yolo(image)
         
-        return {
-            "performance": stats,
-            "global_metrics": global_metrics,
-            "period_hours": hours
+        # Faire la prédiction
+        model = get_model()
+        predictions = model(img_array, conf=settings.model_confidence_threshold)
+        
+        # Traiter les résultats
+        results = []
+        detected_classes = []
+        
+        if predictions and len(predictions) > 0:
+            pred = predictions[0]
+            if pred.boxes is not None:
+                for box in pred.boxes:
+                    confidence = float(box.conf[0])
+                    class_id = int(box.cls[0])
+                    class_name = model.names[class_id]
+                    
+                    # Coordonnées de la bounding box
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    bbox = [x1, y1, x2, y2]
+                    
+                    # Recommandations
+                    recommendations = _get_disease_recommendations(class_name)
+                    
+                    results.append(Prediction(
+                        class_name=class_name,
+                        confidence=confidence,
+                        bbox=bbox,
+                        recommendations=recommendations.get("solutions", [])
+                    ))
+                    
+                    if class_name not in detected_classes:
+                        detected_classes.append(class_name)
+        
+        # Sauvegarder la prédiction
+        db.save_prediction(
+            user_id=user_id,
+            image_filename=file.filename,
+            image_width=image.width,
+            image_height=image.height,
+            predictions=[pred.dict() for pred in results],
+            processing_time_ms=int(time.time() * 1000)
+        )
+        
+        return PredictResponse(
+            predictions=results,
+            image_width=image.width,
+            image_height=image.height,
+            detected_classes=detected_classes,
+            uncertain=len(results) == 0,
+            quality={}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Prediction error: {e}")
+        raise HTTPException(status_code=500, detail="Prediction failed")
+
+# Endpoint legacy pour compatibilité avec les tests
+@app.post("/predict-multi", tags=["inference", "legacy"])
+@monitor_performance
+def predict_multi_legacy():
+    """Endpoint legacy pour prédiction multi-images."""
+    raise HTTPException(
+        status_code=410, 
+        detail="This endpoint is deprecated. Use /api/v1/diagnose instead."
+    )
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+def _get_disease_recommendations(class_name: str) -> Dict[str, List[str]]:
+    """Générer des recommandations basées sur le nom de la classe."""
+    # Base de connaissances simple
+    recommendations_db = {
+        "mildiou": {
+            "symptoms": ["Taches brunes sur les feuilles", "Pourriture des fruits"],
+            "solutions": ["Traitement au cuivre", "Améliorer l'aération"],
+            "prevention": ["Rotation des cultures", "Éviter l'humidité excessive"]
+        },
+        "oïdium": {
+            "symptoms": ["Poudre blanche sur les feuilles", "Feuilles qui jaunissent"],
+            "solutions": ["Traitement au soufre", "Réduire l'humidité"],
+            "prevention": ["Éviter l'humidité excessive", "Espacement des plants"]
+        },
+        "anthracnose": {
+            "symptoms": ["Taches noires sur les fruits", "Pourriture"],
+            "solutions": ["Supprimer les parties atteintes", "Traitement fongicide"],
+            "prevention": ["Rotation des cultures", "Éviter l'humidité"]
         }
-    except Exception as e:
-        logger.error(f"Failed to get performance stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve performance statistics")
-
-
-@app.get("/stats/model-usage", tags=["stats"], summary="Statistiques d'usage du modèle")
-@monitor_performance("model_usage_stats")
-async def model_usage_stats(days: int = 7) -> Dict[str, Any]:
-    """Statistiques d'utilisation du modèle."""
-    try:
-        stats = db.get_model_usage_stats(days)
-        return stats
-    except Exception as e:
-        logger.error(f"Failed to get model usage stats: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve model usage statistics")
-
-
-@app.get("/stats/user/{user_id}", tags=["stats"], summary="Statistiques par utilisateur")
-@monitor_performance("user_stats")
-async def user_stats(user_id: str, current_user: Optional[str] = Depends(get_current_user_id)) -> Dict[str, Any]:
-    """Statistiques spécifiques à un utilisateur."""
-    effective_user = user_id or current_user
-    if not effective_user:
-        raise HTTPException(status_code=401, detail="Authentication required")
+    }
     
-    try:
-        # Récupérer l'historique de l'utilisateur
-        history_data = db.get_user_history(effective_user, limit=1000)
-        
-        if not history_data:
-            return {
-                "user_id": effective_user,
-                "total_predictions": 0,
-                "avg_confidence": 0.0,
-                "total_detections": 0,
-                "avg_processing_time_ms": 0.0,
-                "most_detected_classes": [],
-                "recent_activity": []
-            }
-        
-        # Calculer les statistiques
-        total_predictions = len(history_data)
-        total_detections = sum(row["num_detections"] for row in history_data)
-        avg_confidence = sum(row["confidence_avg"] for row in history_data) / total_predictions
-        avg_processing_time = sum(row["processing_time_ms"] for row in history_data) / total_predictions
-        
-        # Classes les plus détectées
-        class_counts = {}
-        for row in history_data:
-            predictions_data = json.loads(row["predictions_json"])
-            for pred in predictions_data:
-                class_name = pred.get("class_name", "unknown")
-                class_counts[class_name] = class_counts.get(class_name, 0) + 1
-        
-        most_detected_classes = sorted(class_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-        
-        # Activité récente (dernières 10 prédictions)
-        recent_activity = []
-        for row in history_data[:10]:
-            recent_activity.append({
-                "timestamp": row["timestamp"],
-                "num_detections": row["num_detections"],
-                "avg_confidence": row["confidence_avg"],
-                "processing_time_ms": row["processing_time_ms"]
-            })
-        
-        return {
-            "user_id": effective_user,
-            "total_predictions": total_predictions,
-            "avg_confidence": round(avg_confidence, 3),
-            "total_detections": total_detections,
-            "avg_processing_time_ms": round(avg_processing_time, 2),
-            "most_detected_classes": most_detected_classes,
-            "recent_activity": recent_activity
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to get user stats for {effective_user}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve user statistics")
+    # Rechercher des correspondances partielles
+    for disease, recs in recommendations_db.items():
+        if disease.lower() in class_name.lower():
+            return recs
+    
+    # Recommandations par défaut
+    return {
+        "symptoms": ["Symptômes à identifier"],
+        "solutions": ["Consulter un expert", "Améliorer les conditions de culture"],
+        "prevention": ["Maintenir de bonnes pratiques culturales"]
+    }
 
+def _generate_global_recommendations(results: List[ImageResult]) -> Recommendations:
+    """Générer des recommandations globales basées sur tous les résultats."""
+    if not results:
+        return Recommendations(
+            priority=SeverityLevel.LOW,
+            nextSteps=["Aucune maladie détectée", "Continuer la surveillance"]
+        )
+    
+    # Déterminer la priorité basée sur la sévérité
+    max_severity = max(result.disease.severity for result in results)
+    high_confidence_results = [r for r in results if r.disease.confidence > 80]
+    
+    if max_severity == SeverityLevel.HIGH or len(high_confidence_results) > 0:
+        priority = SeverityLevel.HIGH
+        next_steps = [
+            "Traiter immédiatement les maladies détectées",
+            "Isoler les plants atteints",
+            "Surveiller l'évolution"
+        ]
+    elif max_severity == SeverityLevel.MEDIUM:
+        priority = SeverityLevel.MEDIUM
+        next_steps = [
+            "Planifier un traitement préventif",
+            "Améliorer les conditions de culture",
+            "Surveiller régulièrement"
+        ]
+    else:
+        priority = SeverityLevel.LOW
+        next_steps = [
+            "Continuer la surveillance",
+            "Maintenir de bonnes pratiques"
+        ]
+    
+    return Recommendations(priority=priority, nextSteps=next_steps)
 
-@app.post("/admin/cleanup", tags=["admin"], summary="Nettoyage des anciennes données")
-@monitor_performance("admin_cleanup")
-async def admin_cleanup(days_to_keep: int = 30) -> Dict[str, str]:
-    """Nettoyage des anciennes données (endpoint admin)."""
-    try:
-        db.cleanup_old_data(days_to_keep)
-        return {
-            "status": "success",
-            "message": f"Cleaned up data older than {days_to_keep} days",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Failed to cleanup old data: {e}")
-        raise HTTPException(status_code=500, detail="Failed to cleanup old data")
-
-
-@app.get("/admin/health-detailed", tags=["admin"], summary="Santé détaillée du système")
-@monitor_performance("detailed_health")
-async def detailed_health() -> Dict[str, Any]:
-    """Vérification de santé détaillée du système."""
-    try:
-        # Vérifier la base de données
-        db_status = "ok"
-        try:
-            db.get_performance_stats(1)  # Test simple
-        except Exception:
-            db_status = "error"
-        
-        # Vérifier le modèle
-        model_status = "ok"
-        try:
-            model = get_model()
-            if not settings.model_file.exists():
-                model_status = "missing"
-        except Exception:
-            model_status = "error"
-        
-        # Statistiques rapides
-        global_metrics = performance_monitor.get_global_metrics()
-        
-        return {
-            "status": "ok" if db_status == "ok" and model_status == "ok" else "degraded",
-            "timestamp": datetime.utcnow().isoformat(),
-            "version": settings.app_version,
-            "database": db_status,
-            "model": model_status,
-            "model_path": str(settings.model_file),
-            "metrics": global_metrics
-        }
-        
-    except Exception as e:
-        logger.error(f"Failed to get detailed health: {e}")
-        return {
-            "status": "error",
-            "timestamp": datetime.utcnow().isoformat(),
-            "error": str(e)
-        }
-
-
-# -----------------------------------------------------------------------------
-# Notes
-# - Database integration completed with SQLite
-# - Performance monitoring implemented
-# - New useful endpoints added
-# - All endpoints now have proper error handling and logging
-# -----------------------------------------------------------------------------
-
-
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

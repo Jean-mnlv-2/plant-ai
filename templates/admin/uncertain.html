@@ -1,48 +1,483 @@
 {% extends "admin/base.html" %}
-{% block content %}
-<h1 class="text-2xl font-semibold mb-4">Cas incertains</h1>
 
-<div class="bg-white rounded shadow p-4">
-  <table class="w-full text-sm">
-    <thead>
-      <tr class="border-b text-gray-600">
-        <th class="text-left py-2">Date</th>
-        <th class="text-left">Fichier</th>
-        <th class="text-left">Raison</th>
-        <th class="text-right">Min conf</th>
-        <th class="text-right">Max conf</th>
+{% block header %}Cas Incertains{% endblock %}
+
+{% block content %}
+<div x-data="uncertainManager()" x-init="init()" class="space-y-6">
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Total Incertains</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="uncertainItems.length"></p>
+        </div>
+        <div class="h-12 w-12 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-question-circle text-yellow-600 dark:text-yellow-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Faible Confiance</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="lowConfidenceCount"></p>
+        </div>
+        <div class="h-12 w-12 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-exclamation-triangle text-red-600 dark:text-red-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Multiples Détections</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="multipleDetectionsCount"></p>
+        </div>
+        <div class="h-12 w-12 bg-orange-100 dark:bg-orange-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-layer-group text-orange-600 dark:text-orange-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">À Réviser</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="pendingReviewCount"></p>
+        </div>
+        <div class="h-12 w-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-eye text-blue-600 dark:text-blue-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters and Actions -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
+      <!-- Search and Filters -->
+      <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+        <div class="relative">
+          <input 
+            x-model="searchQuery" 
+            type="text" 
+            placeholder="Rechercher par fichier ou raison..."
+            class="pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full sm:w-64"
+          >
+          <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+        </div>
+        
+        <select x-model="reasonFilter" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <option value="">Toutes les raisons</option>
+          <option value="low_confidence">Faible confiance</option>
+          <option value="multiple_detections">Multiples détections</option>
+          <option value="no_detection">Aucune détection</option>
+          <option value="ambiguous">Ambigu</option>
+        </select>
+
+        <select x-model="confidenceRangeFilter" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <option value="">Toutes confiances</option>
+          <option value="very_low">Très faible (<30%)</option>
+          <option value="low">Faible (30-50%)</option>
+          <option value="medium">Moyenne (50-70%)</option>
+          <option value="high">Élevée (70-90%)</option>
+        </select>
+
+        <select x-model="sortBy" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <option value="date">Date récente</option>
+          <option value="confidence">Confiance</option>
+          <option value="reason">Raison</option>
+          <option value="filename">Nom fichier</option>
+        </select>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex space-x-2">
+        <button @click="markAllAsReviewed()" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center">
+          <i class="fas fa-check-double mr-2"></i>
+          Marquer tout comme révisé
+        </button>
+        <button @click="exportUncertain()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center">
+          <i class="fas fa-download mr-2"></i>
+          Exporter
+        </button>
+        <button @click="refreshUncertain()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors flex items-center">
+          <i class="fas fa-sync-alt mr-2"></i>
+          Actualiser
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Uncertain Items Table -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50 dark:bg-gray-700">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              <input type="checkbox" @change="toggleSelectAll()" :checked="selectedItems.length === filteredItems.length && filteredItems.length > 0" class="rounded border-gray-300 dark:border-gray-600">
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fichier</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Raison</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Confiance</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Statut</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
       </tr>
     </thead>
-    <tbody>
-      {% for it in items %}
-      <tr class="border-b last:border-0">
-        <td class="py-2">{{ it.timestamp }}</td>
-        <td>{{ it.image_filename or '-' }}</td>
-        <td>{{ it.reason }}</td>
-        <td class="text-right">{{ it.min_confidence }}</td>
-        <td class="text-right">{{ it.max_confidence }}</td>
+        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+          <template x-for="item in paginatedItems" :key="item.id">
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <td class="px-6 py-4 whitespace-nowrap">
+                <input type="checkbox" :value="item.id" @change="toggleItemSelection(item.id)" :checked="selectedItems.includes(item.id)" class="rounded border-gray-300 dark:border-gray-600">
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white" x-text="formatDate(item.timestamp)"></td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                  <div class="flex-shrink-0 h-10 w-10 mr-3">
+                    <img :src="getImagePreview(item.image_filename)" :alt="item.image_filename" class="h-10 w-10 rounded-lg object-cover bg-gray-200 dark:bg-gray-700" onerror="this.style.display='none'">
+                    <div x-show="!item.image_filename" class="h-10 w-10 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                      <i class="fas fa-image text-gray-400"></i>
+                    </div>
+                  </div>
+                  <div class="text-sm text-gray-900 dark:text-white" x-text="item.image_filename || 'N/A'"></div>
+                </div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full" :class="getReasonBadgeClass(item.reason)" x-text="getReasonText(item.reason)"></span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                  <div class="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 mr-2">
+                    <div class="h-2 rounded-full" :class="getConfidenceBarClass(item.min_confidence)" :style="`width: ${item.min_confidence * 100}%`"></div>
+                  </div>
+                  <div class="text-sm text-gray-900 dark:text-white">
+                    <span x-text="(item.min_confidence * 100).toFixed(1) + '%'"></span>
+                    <span x-show="item.max_confidence !== item.min_confidence" x-text="' - ' + (item.max_confidence * 100).toFixed(1) + '%'"></span>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full" :class="getStatusBadgeClass(item)" x-text="getStatusText(item)"></span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                <div class="flex items-center justify-end space-x-2">
+                  <button @click="viewImage(item)" class="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300" title="Voir image">
+                    <i class="fas fa-eye"></i>
+                  </button>
+                  <button @click="reviewItem(item)" class="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300" title="Réviser">
+                    <i class="fas fa-check"></i>
+                  </button>
+                  <button @click="flagForRetraining(item)" class="text-purple-600 dark:text-purple-400 hover:text-purple-900 dark:hover:text-purple-300" title="Marquer pour réentraînement">
+                    <i class="fas fa-flag"></i>
+                  </button>
+                  <button @click="deleteItem(item)" class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300" title="Supprimer">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </td>
       </tr>
-      {% endfor %}
+          </template>
     </tbody>
   </table>
-  <div class="flex justify-between items-center mt-3">
-    <button
-      class="px-3 py-1 bg-gray-100 rounded disabled:opacity-50"
-      hx-get="/admin/uncertain?page={{ page-1 if page>1 else 1 }}&size={{ size }}"
-      hx-target="main"
-      hx-swap="innerHTML"
-      {% if page<=1 %}disabled{% endif %}
-    >Précédent</button>
-    <div class="text-sm">Page {{ page }} • Total {{ total }}</div>
-    <button
-      class="px-3 py-1 bg-gray-100 rounded disabled:opacity-50"
-      hx-get="/admin/uncertain?page={{ page+1 }}&size={{ size }}"
-      hx-target="main"
-      hx-swap="innerHTML"
-      {% if page*size >= total %}disabled{% endif %}
-    >Suivant</button>
+    </div>
+
+    <!-- Empty State -->
+    <div x-show="filteredItems.length === 0" class="text-center py-12">
+      <i class="fas fa-check-circle text-6xl text-green-400 mb-4"></i>
+      <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Aucun cas incertain</h3>
+      <p class="text-gray-500 dark:text-gray-400">Excellent ! Tous les cas ont été traités avec succès.</p>
+    </div>
+
+    <!-- Pagination -->
+    <div x-show="filteredItems.length > 0" class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+      <div class="text-sm text-gray-700 dark:text-gray-300">
+        Affichage de <span x-text="(currentPage - 1) * itemsPerPage + 1"></span> à <span x-text="Math.min(currentPage * itemsPerPage, filteredItems.length)"></span> sur <span x-text="filteredItems.length"></span> cas incertains
+      </div>
+      <div class="flex items-center space-x-2">
+        <select x-model="itemsPerPage" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+          <option value="10">10 par page</option>
+          <option value="25">25 par page</option>
+          <option value="50">50 par page</option>
+        </select>
+        <button @click="currentPage = Math.max(1, currentPage - 1)" :disabled="currentPage === 1" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Précédent</button>
+        <span class="px-3 py-1 text-sm" x-text="currentPage + ' / ' + Math.ceil(filteredItems.length / itemsPerPage)"></span>
+        <button @click="currentPage = Math.min(Math.ceil(filteredItems.length / itemsPerPage), currentPage + 1)" :disabled="currentPage >= Math.ceil(filteredItems.length / itemsPerPage)" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Suivant</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Actions -->
+  <div x-show="selectedItems.length > 0" class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+    <div class="flex items-center justify-between">
+      <span class="text-sm text-blue-800 dark:text-blue-200">
+        <span x-text="selectedItems.length"></span> cas sélectionné(s)
+      </span>
+      <div class="flex space-x-2">
+        <button @click="bulkReview()" class="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600 transition-colors">
+          <i class="fas fa-check mr-1"></i>
+          Marquer comme révisés
+        </button>
+        <button @click="bulkFlag()" class="px-3 py-1 text-sm bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors">
+          <i class="fas fa-flag mr-1"></i>
+          Marquer pour réentraînement
+        </button>
+        <button @click="bulkDelete()" class="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+          <i class="fas fa-trash mr-1"></i>
+          Supprimer
+        </button>
+      </div>
+    </div>
   </div>
 </div>
+
+<script>
+function uncertainManager() {
+  return {
+    uncertainItems: {{ items | tojson }} || [],
+    searchQuery: '',
+    reasonFilter: '',
+    confidenceRangeFilter: '',
+    sortBy: 'date',
+    selectedItems: [],
+    currentPage: 1,
+    itemsPerPage: 10,
+    
+    get filteredItems() {
+      let filtered = this.uncertainItems.filter(item => {
+        const matchesSearch = !this.searchQuery || 
+          (item.image_filename && item.image_filename.toLowerCase().includes(this.searchQuery.toLowerCase())) ||
+          (item.reason && item.reason.toLowerCase().includes(this.searchQuery.toLowerCase()));
+        
+        const matchesReason = !this.reasonFilter || item.reason === this.reasonFilter;
+        
+        const matchesConfidenceRange = !this.confidenceRangeFilter || 
+          (this.confidenceRangeFilter === 'very_low' && item.min_confidence < 0.3) ||
+          (this.confidenceRangeFilter === 'low' && item.min_confidence >= 0.3 && item.min_confidence < 0.5) ||
+          (this.confidenceRangeFilter === 'medium' && item.min_confidence >= 0.5 && item.min_confidence < 0.7) ||
+          (this.confidenceRangeFilter === 'high' && item.min_confidence >= 0.7);
+        
+        return matchesSearch && matchesReason && matchesConfidenceRange;
+      });
+      
+      // Sort
+      filtered.sort((a, b) => {
+        switch (this.sortBy) {
+          case 'date':
+            return new Date(b.timestamp) - new Date(a.timestamp);
+          case 'confidence':
+            return a.min_confidence - b.min_confidence;
+          case 'reason':
+            return (a.reason || '').localeCompare(b.reason || '');
+          case 'filename':
+            return (a.image_filename || '').localeCompare(b.image_filename || '');
+          default:
+            return 0;
+        }
+      });
+      
+      return filtered;
+    },
+    
+    get paginatedItems() {
+      const start = (this.currentPage - 1) * this.itemsPerPage;
+      const end = start + this.itemsPerPage;
+      return this.filteredItems.slice(start, end);
+    },
+    
+    get lowConfidenceCount() {
+      return this.uncertainItems.filter(item => item.min_confidence < 0.5).length;
+    },
+    
+    get multipleDetectionsCount() {
+      return this.uncertainItems.filter(item => item.reason === 'multiple_detections').length;
+    },
+    
+    get pendingReviewCount() {
+      return this.uncertainItems.filter(item => !item.reviewed).length;
+    },
+    
+    formatDate(dateString) {
+      if (!dateString) return 'N/A';
+      return new Date(dateString).toLocaleDateString('fr-FR', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    },
+    
+    getImagePreview(filename) {
+      if (!filename) return null;
+      return `/data/uploads/${filename}`;
+    },
+    
+    getReasonBadgeClass(reason) {
+      switch (reason) {
+        case 'low_confidence':
+          return 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200';
+        case 'multiple_detections':
+          return 'bg-orange-100 dark:bg-orange-900 text-orange-800 dark:text-orange-200';
+        case 'no_detection':
+          return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200';
+        case 'ambiguous':
+          return 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200';
+        default:
+          return 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200';
+      }
+    },
+    
+    getReasonText(reason) {
+      switch (reason) {
+        case 'low_confidence':
+          return 'Faible confiance';
+        case 'multiple_detections':
+          return 'Multiples détections';
+        case 'no_detection':
+          return 'Aucune détection';
+        case 'ambiguous':
+          return 'Ambigu';
+        default:
+          return reason || 'Inconnu';
+      }
+    },
+    
+    getConfidenceBarClass(confidence) {
+      if (confidence >= 0.7) return 'bg-green-500';
+      if (confidence >= 0.5) return 'bg-yellow-500';
+      if (confidence >= 0.3) return 'bg-orange-500';
+      return 'bg-red-500';
+    },
+    
+    getStatusBadgeClass(item) {
+      if (item.reviewed) return 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200';
+      if (item.flagged) return 'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200';
+      return 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200';
+    },
+    
+    getStatusText(item) {
+      if (item.reviewed) return 'Révisé';
+      if (item.flagged) return 'Marqué';
+      return 'En attente';
+    },
+    
+    toggleItemSelection(itemId) {
+      const index = this.selectedItems.indexOf(itemId);
+      if (index > -1) {
+        this.selectedItems.splice(index, 1);
+      } else {
+        this.selectedItems.push(itemId);
+      }
+    },
+    
+    toggleSelectAll() {
+      if (this.selectedItems.length === this.filteredItems.length) {
+        this.selectedItems = [];
+      } else {
+        this.selectedItems = this.filteredItems.map(item => item.id);
+      }
+    },
+    
+    viewImage(item) {
+      if (item.image_filename) {
+        window.open(`/data/uploads/${item.image_filename}`, '_blank');
+      }
+    },
+    
+    reviewItem(item) {
+      if (confirm(`Marquer ce cas comme révisé ?`)) {
+        item.reviewed = true;
+        item.reviewedAt = new Date().toISOString();
+      }
+    },
+    
+    flagForRetraining(item) {
+      if (confirm(`Marquer ce cas pour réentraînement ?`)) {
+        item.flagged = true;
+        item.flaggedAt = new Date().toISOString();
+      }
+    },
+    
+    deleteItem(item) {
+      if (confirm(`Supprimer ce cas incertain ?`)) {
+        this.uncertainItems = this.uncertainItems.filter(i => i.id !== item.id);
+      }
+    },
+    
+    bulkReview() {
+      this.selectedItems.forEach(id => {
+        const item = this.uncertainItems.find(i => i.id === id);
+        if (item) {
+          item.reviewed = true;
+          item.reviewedAt = new Date().toISOString();
+        }
+      });
+      this.selectedItems = [];
+    },
+    
+    bulkFlag() {
+      this.selectedItems.forEach(id => {
+        const item = this.uncertainItems.find(i => i.id === id);
+        if (item) {
+          item.flagged = true;
+          item.flaggedAt = new Date().toISOString();
+        }
+      });
+      this.selectedItems = [];
+    },
+    
+    bulkDelete() {
+      if (confirm(`Supprimer ${this.selectedItems.length} cas incertains ?`)) {
+        this.uncertainItems = this.uncertainItems.filter(i => !this.selectedItems.includes(i.id));
+        this.selectedItems = [];
+      }
+    },
+    
+    markAllAsReviewed() {
+      if (confirm(`Marquer tous les cas comme révisés ?`)) {
+        this.uncertainItems.forEach(item => {
+          item.reviewed = true;
+          item.reviewedAt = new Date().toISOString();
+        });
+      }
+    },
+    
+    exportUncertain() {
+      const csv = this.filteredItems.map(item => 
+        `${item.timestamp},${item.image_filename || ''},${item.reason},${item.min_confidence},${item.max_confidence},${item.reviewed || false}`
+      ).join('\n');
+      
+      const blob = new Blob([`Date,Fichier,Raison,Confiance Min,Confiance Max,Révisé\n${csv}`], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'cas_incertains.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    
+    refreshUncertain() {
+      location.reload();
+    },
+    
+    init() {
+      // Initialize with sample data if empty
+      if (this.uncertainItems.length === 0) {
+        this.uncertainItems = [
+          { id: 1, timestamp: new Date().toISOString(), image_filename: 'uncertain1.jpg', reason: 'low_confidence', min_confidence: 0.45, max_confidence: 0.55, reviewed: false, flagged: false },
+          { id: 2, timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), image_filename: 'uncertain2.jpg', reason: 'multiple_detections', min_confidence: 0.65, max_confidence: 0.75, reviewed: false, flagged: true },
+          { id: 3, timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), image_filename: 'uncertain3.jpg', reason: 'no_detection', min_confidence: 0.0, max_confidence: 0.0, reviewed: true, flagged: false },
+          { id: 4, timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), image_filename: 'uncertain4.jpg', reason: 'ambiguous', min_confidence: 0.35, max_confidence: 0.65, reviewed: false, flagged: false },
+          { id: 5, timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), image_filename: 'uncertain5.jpg', reason: 'low_confidence', min_confidence: 0.25, max_confidence: 0.45, reviewed: false, flagged: false }
+        ];
+      }
+    }
+  }
+}
+</script>
 {% endblock %}
-
-

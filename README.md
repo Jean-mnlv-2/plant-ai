@@ -35,18 +35,15 @@ Plant-AI fournit un diagnostic intelligent des maladies/carences/ravageurs des p
 - **Dataset** : PlantDoc (VOC XML + CSV), enrichissable avec des images locales
 - **Modèle** : YOLOv8 (Ultralytics) - 29 classes de maladies détectables
 - **Pipeline** : acquisition → prétraitement → détection/classification → fusion résultats → diagnostic textuel + visuel
-- **Backend** : API FastAPI pour l'inférence avec base de données SQLite/PostgreSQL
+- **Backend** : API FastAPI pour l'inférence avec base de données SQLite
 
 ### **Arborescence du Projet**
 ```
 Plant-AI/
 ├── README.md                    # Documentation complète
 ├── requirements.txt             # Dépendances unifiées (dev + prod)
-├── LICENSE.txt                  # Licence MIT avec autorisations agricoles
 ├── .gitignore                   # Fichiers à ignorer par Git
 ├── env.example                  # Exemple de variables d'environnement
-├── docker-compose.yml          # Déploiement Docker
-├── init_db.sql                 # Initialisation PostgreSQL
 ├── models/                     # Modèles entraînés
 │   └── yolov8_best.pt
 ├── data/                       # Données brutes et nettoyées
@@ -60,7 +57,6 @@ Plant-AI/
 │       ├── main.py             # API principale
 │       ├── settings.py         # Configuration
 │       ├── database.py         # SQLite
-│       ├── database_postgres.py # PostgreSQL
 │       └── metrics.py          # Métriques
 ├── scripts/                    # Scripts de traitement
 │   ├── analyze_dataset.py
@@ -86,7 +82,7 @@ Plant-AI/
 ```bash
 
 # Configuration du modèle
-python setup_model.py
+# Le modèle sera automatiquement chargé au premier appel
 
 # Démarrage de l'API
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
@@ -120,7 +116,7 @@ if (Test-Path "test_labels.csv")  { Move-Item -Force test_labels.csv  data/raw/ 
 python scripts/train_yolov8.py --data-yaml datasets/yolov8/data.yaml --model yolov8n.pt --imgsz 640 --epochs 50 --batch 16 --device auto
 
 # Configuration automatique
-python setup_model.py
+# Le modèle sera automatiquement chargé au premier appel
 ```
 
 ### **Configuration des Variables d'Environnement**
@@ -337,19 +333,54 @@ python scripts/convert_to_coco.py --root . --train_csv data/cleaned/train_labels
 
 ---
 
+## 🆕 Nouvelles APIs Implémentées
+
+### **🔐 Authentification Complète**
+- **POST /api/v1/auth/register** - Inscription utilisateur
+- **POST /api/v1/auth/login** - Connexion utilisateur  
+- **POST /api/v1/auth/refresh** - Renouvellement de token
+
+### **🔬 Diagnostic IA Avancé**
+- **POST /api/v1/diagnose** - Diagnostic multi-images avec localisation
+- Analyse contextuelle (météo, type de plante, symptômes)
+- Recommandations personnalisées et urgence de traitement
+
+### **📊 Gestion des Diagnostics**
+- **GET /api/v1/diagnostics** - Historique avec pagination
+- **GET /api/v1/diagnostics/{id}** - Diagnostic spécifique
+- **POST /api/v1/diagnostics/sync** - Synchronisation hors ligne
+
+### **🌤️ Météo Agricole**
+- **GET /api/v1/weather** - Données météo en temps réel
+- Prévisions 5 jours avec conseils agricoles
+- Alertes météo et conditions optimales
+
+### **📚 Base de Connaissances**
+- **GET /api/v1/diseases** - Recherche de maladies
+- **GET /api/v1/diseases/{id}** - Détails maladie
+- Base de données complète avec solutions et prévention
+
+### **👤 Gestion Utilisateurs**
+- **GET /api/v1/users/profile** - Profil utilisateur
+- Statistiques personnalisées et préférences
+- Rôles utilisateur (farmer, agronomist, researcher, admin)
+
+### **📖 Documentation Complète**
+- Documentation Swagger/OpenAPI interactive
+- Exemples cURL pour tous les endpoints
+- Guide d'intégration frontend
+
+---
+
 ## ✨ Améliorations Implémentées
 
 ### **🗄️ Base de Données Intégrée**
 
-#### **SQLite (Développement)**
+#### **SQLite (Développement et Production)**
 - **Fichier** : `backend/app/database.py`
 - **Tables** : `predictions`, `performance_metrics`, `model_usage`
 - **Fonctionnalités** : Sauvegarde automatique, historique utilisateur, nettoyage automatique
-
-#### **PostgreSQL (Production)**
-- **Fichier** : `backend/app/database_postgres.py`
-- **Avantages** : Concurrence, scalabilité, monitoring avancé
-- **Déploiement** : Docker Compose avec configuration optimisée
+- **Avantages** : Simplicité, pas de serveur requis, performances suffisantes pour la plupart des cas d'usage
 
 ### **📊 Métriques de Performance**
 
@@ -395,64 +426,51 @@ python scripts/convert_to_coco.py --root . --train_csv data/cleaned/train_labels
 - Test du diagnostic consolidé
 - Comparaison avec l'analyse d'une seule image
 
-#### **`setup_model.py`**
-- Configuration automatique du modèle
-- Copie du modèle entraîné vers l'emplacement correct
-- Vérification de la configuration
 
 ---
 
-## 🐘 Déploiement Production PostgreSQL
-
-### **Pourquoi PostgreSQL pour la Production ?**
-
-| Aspect | SQLite | PostgreSQL | Impact Production |
-|--------|--------|------------|-------------------|
-| **Concurrence** | 1 utilisateur | 1000+ utilisateurs | 🚀 **Critique** |
-| **Performance** | Local uniquement | Réseau optimisé | 🚀 **Essentiel** |
-| **Scalabilité** | Monolithique | Multi-services | 🚀 **Vital** |
-| **Sauvegarde** | Fichier simple | Hot backup + réplication | 🛡️ **Sécurité** |
-| **Monitoring** | Basique | Métriques avancées | 📊 **Observabilité** |
-
-### **Déploiement Docker Compose**
+### **Déploiement Simple**
 
 #### **Structure de Déploiement**
 ```
-plant-ai-production/
-├── docker-compose.yml          # Orchestration des services
-├── init_db.sql                 # Initialisation PostgreSQL
-├── requirements_production.txt # Dépendances production
-├── nginx.conf                  # Reverse proxy
-└── .env                        # Variables d'environnement
+plant-ai/
+├── requirements.txt            # Dépendances unifiées
+├── env.example                 # Variables d'environnement
+├── backend/                    # Code de l'application
+└── models/                     # Modèles entraînés
 ```
 
 #### **Démarrage Rapide**
 ```bash
 # 1. Configuration
-git clone <your-repo> plant-ai-production
-cd plant-ai-production
+git clone <your-repo> plant-ai
+cd plant-ai
 
-# 2. Variables d'environnement
-cp .env.example .env
+# 2. Installation des dépendances
+pip install -r requirements.txt
+
+# 3. Variables d'environnement
+cp env.example .env
 # Éditer .env avec vos paramètres
 
-# 3. Démarrage des services
-docker-compose up -d
+# 4. Démarrage de l'application
+python start_api.py
 
-# 4. Vérification
-curl http://localhost:8000/admin/health-detailed
+# 5. Test de l'API
+python test_new_api.py
+
+# 6. Accès aux services
+# API: http://localhost:8000
+# Documentation: http://localhost:8000/docs
+# Admin: http://localhost:8000/admin/
 ```
 
 ### **Configuration Avancée**
 
 #### **Variables d'Environnement (.env)**
 ```bash
-# Base de données PostgreSQL
-PLANT_AI_DB_HOST=postgres
-PLANT_AI_DB_PORT=5432
-PLANT_AI_DB_NAME=plant_ai
-PLANT_AI_DB_USER=plant_ai
-PLANT_AI_DB_PASSWORD=your_secure_password_2024
+# Base de données SQLite (fichier local)
+PLANT_AI_DB_PATH=./data/plant_ai.db
 
 # API Configuration
 PLANT_AI_LOG_LEVEL=INFO
@@ -540,7 +558,7 @@ call venv\Scripts\activate.bat
 pip install -r requirements.txt
 
 :: 3. Configuration automatique
-python setup_model.py
+# Le modèle sera automatiquement chargé au premier appel
 
 :: 4. Démarrage API
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload

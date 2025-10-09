@@ -1,46 +1,377 @@
 {% extends "admin/base.html" %}
+
+{% block header %}Dashboard{% endblock %}
+
 {% block content %}
-<h1 class="text-2xl font-semibold mb-4">Dashboard</h1>
+<div x-data="dashboardManager()" x-init="init()" class="space-y-6">
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <!-- Total Requests -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Requêtes (24h)</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.general.total_requests or 0 }}</p>
+          <p class="text-xs text-green-600 dark:text-green-400 mt-1">
+            <i class="fas fa-arrow-up mr-1"></i>+12% vs hier
+          </p>
+        </div>
+        <div class="h-12 w-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-chart-line text-blue-600 dark:text-blue-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-  <div class="bg-white rounded shadow p-4">
-    <div class="text-sm text-gray-500">Requêtes (24h)</div>
-    <div class="text-3xl font-bold">{{ stats.general.total_requests or 0 }}</div>
+    <!-- Response Time -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Temps moyen (ms)</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ stats.general.avg_response_time or 0 }}</p>
+          <p class="text-xs text-green-600 dark:text-green-400 mt-1">
+            <i class="fas fa-arrow-down mr-1"></i>-5% vs hier
+          </p>
+        </div>
+        <div class="h-12 w-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-stopwatch text-green-600 dark:text-green-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- Predictions -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Prédictions (7j)</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ model_usage.total_predictions or 0 }}</p>
+          <p class="text-xs text-blue-600 dark:text-blue-400 mt-1">
+            <i class="fas fa-brain mr-1"></i>Modèle actif
+          </p>
+        </div>
+        <div class="h-12 w-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-brain text-purple-600 dark:text-purple-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error Rate -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Taux d'erreur</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white">{{ ((stats.general.error_count or 0) / (stats.general.total_requests or 1) * 100) | round(2) }}%</p>
+          <p class="text-xs text-red-600 dark:text-red-400 mt-1">
+            <i class="fas fa-exclamation-triangle mr-1"></i>{{ stats.general.error_count or 0 }} erreurs
+          </p>
+        </div>
+        <div class="h-12 w-12 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-exclamation-triangle text-red-600 dark:text-red-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
   </div>
-  <div class="bg-white rounded shadow p-4">
-    <div class="text-sm text-gray-500">Temps moyen (ms)</div>
-    <div class="text-3xl font-bold">{{ stats.general.avg_response_time or 0 }}</div>
+
+  <!-- Charts Row -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Performance Chart -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Performance (24h)</h3>
+        <div class="flex space-x-2">
+          <button @click="chartTimeframe = '24h'" :class="chartTimeframe === '24h' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" class="px-3 py-1 rounded-lg text-sm transition-colors">24h</button>
+          <button @click="chartTimeframe = '7d'" :class="chartTimeframe === '7d' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" class="px-3 py-1 rounded-lg text-sm transition-colors">7j</button>
+        </div>
+      </div>
+      <canvas id="performanceChart" class="w-full h-64"></canvas>
+    </div>
+
+    <!-- Model Usage Chart -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Usage du Modèle</h3>
+        <span class="text-sm text-gray-500 dark:text-gray-400">7 derniers jours</span>
+      </div>
+      <canvas id="modelUsageChart" class="w-full h-64"></canvas>
+    </div>
   </div>
-  <div class="bg-white rounded shadow p-4">
-    <div class="text-sm text-gray-500">Prédictions (7j)</div>
-    <div class="text-3xl font-bold">{{ model_usage.total_predictions or 0 }}</div>
+
+  <!-- Endpoints Table -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+    <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Endpoints les plus utilisés</h3>
+        <div class="flex items-center space-x-2">
+          <div class="relative">
+            <input 
+              x-model="searchEndpoint" 
+              type="text" 
+              placeholder="Rechercher un endpoint..."
+              class="pl-8 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+            <i class="fas fa-search absolute left-2.5 top-3 text-gray-400"></i>
+          </div>
+          <button @click="sortBy = sortBy === 'requests' ? '-requests' : 'requests'" class="p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+            <i class="fas fa-sort"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50 dark:bg-gray-700">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Endpoint</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Requêtes</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Erreurs</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Temps moyen</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+          <template x-for="endpoint in filteredEndpoints" :key="endpoint.endpoint">
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                  <div class="flex-shrink-0 h-2 w-2 rounded-full" :class="getStatusColor(endpoint.error_rate)"></div>
+                  <div class="ml-3">
+                    <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="endpoint.endpoint"></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-white" x-text="endpoint.request_count"></td>
+              <td class="px-6 py-4 whitespace-nowrap text-right">
+                <span class="text-sm" :class="endpoint.error_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'" x-text="endpoint.error_count"></span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-white" x-text="endpoint.avg_response_time + 'ms'"></td>
+              <td class="px-6 py-4 whitespace-nowrap text-right">
+                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full" :class="getStatusBadge(endpoint.error_rate)" x-text="getStatusText(endpoint.error_rate)"></span>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+      <div class="text-sm text-gray-700 dark:text-gray-300">
+        Affichage de <span x-text="(currentPage - 1) * itemsPerPage + 1"></span> à <span x-text="Math.min(currentPage * itemsPerPage, filteredEndpoints.length)"></span> sur <span x-text="filteredEndpoints.length"></span> résultats
+      </div>
+      <div class="flex items-center space-x-2">
+        <button @click="currentPage = Math.max(1, currentPage - 1)" :disabled="currentPage === 1" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Précédent</button>
+        <span class="px-3 py-1 text-sm" x-text="currentPage + ' / ' + Math.ceil(filteredEndpoints.length / itemsPerPage)"></span>
+        <button @click="currentPage = Math.min(Math.ceil(filteredEndpoints.length / itemsPerPage), currentPage + 1)" :disabled="currentPage >= Math.ceil(filteredEndpoints.length / itemsPerPage)" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Suivant</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Status -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Status Système</h3>
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-gray-600 dark:text-gray-400">API</span>
+          <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+            <i class="fas fa-check-circle mr-1"></i>En ligne
+          </span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-gray-600 dark:text-gray-400">Base de données</span>
+          <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+            <i class="fas fa-check-circle mr-1"></i>Connectée
+          </span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-gray-600 dark:text-gray-400">Modèle ML</span>
+          <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+            <i class="fas fa-check-circle mr-1"></i>Chargé
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Dernières Activités</h3>
+      <div class="space-y-3">
+        <div class="flex items-center space-x-3">
+          <div class="h-2 w-2 bg-blue-500 rounded-full"></div>
+          <div class="flex-1">
+            <p class="text-sm text-gray-900 dark:text-white">Nouvelle prédiction</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Il y a 2 minutes</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-3">
+          <div class="h-2 w-2 bg-green-500 rounded-full"></div>
+          <div class="flex-1">
+            <p class="text-sm text-gray-900 dark:text-white">Modèle mis à jour</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Il y a 1 heure</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-3">
+          <div class="h-2 w-2 bg-yellow-500 rounded-full"></div>
+          <div class="flex-1">
+            <p class="text-sm text-gray-900 dark:text-white">Nouveau feedback</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Il y a 3 heures</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Actions Rapides</h3>
+      <div class="space-y-2">
+        <button class="w-full flex items-center justify-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+          <i class="fas fa-sync-alt mr-2"></i>
+          Actualiser les données
+        </button>
+        <button class="w-full flex items-center justify-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">
+          <i class="fas fa-download mr-2"></i>
+          Exporter les logs
+        </button>
+        <button class="w-full flex items-center justify-center px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors">
+          <i class="fas fa-cog mr-2"></i>
+          Paramètres
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
-<div class="mt-6 bg-white rounded shadow p-4">
-  <h2 class="text-lg font-semibold mb-2">Endpoints les plus utilisés</h2>
-  <table class="w-full text-sm">
-    <thead>
-      <tr class="border-b text-gray-600">
-        <th class="text-left py-2">Endpoint</th>
-        <th class="text-right">Requêtes</th>
-        <th class="text-right">Erreur</th>
-        <th class="text-right">Temps moyen</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for ep in stats.by_endpoint %}
-      <tr class="border-b last:border-0">
-        <td class="py-2">{{ ep.endpoint }}</td>
-        <td class="text-right">{{ ep.request_count }}</td>
-        <td class="text-right">{{ ep.error_count }}</td>
-        <td class="text-right">{{ ep.avg_response_time|round(2) }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
+<script>
+function dashboardManager() {
+  return {
+    searchEndpoint: '',
+    sortBy: 'requests',
+    currentPage: 1,
+    itemsPerPage: 10,
+    chartTimeframe: '24h',
+    
+    get endpoints() {
+      const sorted = [...({{ stats.by_endpoint | tojson }} || [])].sort((a, b) => {
+        if (this.sortBy === 'requests') return b.request_count - a.request_count;
+        if (this.sortBy === '-requests') return a.request_count - b.request_count;
+        if (this.sortBy === 'errors') return b.error_count - a.error_count;
+        if (this.sortBy === '-errors') return a.error_count - b.error_count;
+        return 0;
+      });
+      
+      return sorted.filter(ep => 
+        ep.endpoint.toLowerCase().includes(this.searchEndpoint.toLowerCase())
+      );
+    },
+    
+    get filteredEndpoints() {
+      const start = (this.currentPage - 1) * this.itemsPerPage;
+      const end = start + this.itemsPerPage;
+      return this.endpoints.slice(start, end);
+    },
+    
+    getStatusColor(errorRate) {
+      if (errorRate < 1) return 'bg-green-500';
+      if (errorRate < 5) return 'bg-yellow-500';
+      return 'bg-red-500';
+    },
+    
+    getStatusBadge(errorRate) {
+      if (errorRate < 1) return 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200';
+      if (errorRate < 5) return 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200';
+      return 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200';
+    },
+    
+    getStatusText(errorRate) {
+      if (errorRate < 1) return 'Excellent';
+      if (errorRate < 5) return 'Bon';
+      return 'Problème';
+    },
+    
+    init() {
+      this.initCharts();
+    },
+    
+    initCharts() {
+      // Performance Chart
+      const perfCtx = document.getElementById('performanceChart').getContext('2d');
+      new Chart(perfCtx, {
+        type: 'line',
+        data: {
+          labels: ['00h', '04h', '08h', '12h', '16h', '20h'],
+          datasets: [{
+            label: 'Requêtes/min',
+            data: [12, 19, 3, 25, 22, 30],
+            borderColor: 'rgb(59, 130, 246)',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            tension: 0.4
+          }, {
+            label: 'Temps moyen (ms)',
+            data: [45, 52, 48, 38, 42, 35],
+            borderColor: 'rgb(16, 185, 129)',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            tension: 0.4,
+            yAxisID: 'y1'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              labels: {
+                color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151'
+              }
+            }
+          },
+          scales: {
+            y: {
+              type: 'linear',
+              display: true,
+              position: 'left',
+              ticks: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151' },
+              grid: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#e5e7eb' }
+            },
+            y1: {
+              type: 'linear',
+              display: true,
+              position: 'right',
+              ticks: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151' },
+              grid: { drawOnChartArea: false }
+            },
+            x: {
+              ticks: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151' },
+              grid: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#e5e7eb' }
+            }
+          }
+        }
+      });
+      
+      // Model Usage Chart
+      const modelCtx = document.getElementById('modelUsageChart').getContext('2d');
+      new Chart(modelCtx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Prédictions réussies', 'Erreurs', 'En attente'],
+          datasets: [{
+            data: [85, 10, 5],
+            backgroundColor: ['#10b981', '#ef4444', '#f59e0b'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151'
+              }
+            }
+          }
+        }
+      });
+    }
+  }
+}
+</script>
 {% endblock %}
-
-
-

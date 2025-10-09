@@ -97,6 +97,37 @@ class Database:
                         max_confidence REAL
                     )
                 """)
+                
+                # Table des utilisateurs
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        email TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        country TEXT NOT NULL,
+                        role TEXT NOT NULL DEFAULT 'farmer',
+                        preferences TEXT,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL
+                    )
+                """)
+                
+                # Table des diagnostics
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS diagnostics (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        images TEXT NOT NULL,
+                        results TEXT NOT NULL,
+                        location TEXT,
+                        plant_type TEXT,
+                        status TEXT DEFAULT 'completed',
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        FOREIGN KEY (user_id) REFERENCES users (id)
+                    )
+                """)
     
     def save_prediction(
         self,
@@ -106,10 +137,17 @@ class Database:
         image_height: int,
         predictions: List[Dict[str, Any]],
         processing_time_ms: int,
-        confidence_avg: float,
-        num_detections: int
+        confidence_avg: Optional[float] = None,
+        num_detections: Optional[int] = None
     ) -> int:
         """Sauvegarde une prédiction dans la base de données."""
+        # Calculer les valeurs par défaut si non fournies
+        if confidence_avg is None:
+            confidence_avg = sum(p.get('confidence', 0) for p in predictions) / len(predictions) if predictions else 0.0
+        
+        if num_detections is None:
+            num_detections = len(predictions)
+        
         with self._lock:
             with sqlite3.connect(str(self.db_path)) as conn:
                 cursor = conn.execute("""
@@ -347,6 +385,196 @@ class Database:
                     **stats,
                     "top_classes": top_classes,
                     "period_days": days
+                }
+    
+    def create_user(self, user_data: Dict[str, Any], password_hash: str):
+        """Créer un nouvel utilisateur."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.execute("""
+                    INSERT INTO users (id, name, email, password_hash, country, role, preferences, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    user_data["id"],
+                    user_data["name"],
+                    user_data["email"],
+                    password_hash,
+                    user_data["country"],
+                    user_data["role"],
+                    json.dumps(user_data.get("preferences", {})),
+                    user_data["createdAt"],
+                    datetime.utcnow()
+                ))
+                conn.commit()
+    
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Récupérer un utilisateur par email."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute("""
+                    SELECT id, name, email, country, role, preferences, created_at
+                    FROM users WHERE email = ?
+                """, (email,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "id": row[0],
+                        "name": row[1],
+                        "email": row[2],
+                        "country": row[3],
+                        "role": row[4],
+                        "preferences": json.loads(row[5]) if row[5] else {},
+                        "createdAt": row[6]
+                    }
+                return None
+    
+    def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Récupérer un utilisateur par ID."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute("""
+                    SELECT id, name, email, country, role, preferences, created_at
+                    FROM users WHERE id = ?
+                """, (user_id,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "id": row[0],
+                        "name": row[1],
+                        "email": row[2],
+                        "country": row[3],
+                        "role": row[4],
+                        "preferences": json.loads(row[5]) if row[5] else {},
+                        "createdAt": row[6]
+                    }
+                return None
+    
+    def get_user_password(self, email: str) -> Optional[str]:
+        """Récupérer le hash du mot de passe d'un utilisateur."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute("""
+                    SELECT password_hash FROM users WHERE email = ?
+                """, (email,))
+                row = cursor.fetchone()
+                return row[0] if row else None
+    
+    def save_diagnostic(self, diagnostic_data: Dict[str, Any]):
+        """Sauvegarder un diagnostic."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                conn.execute("""
+                    INSERT INTO diagnostics (id, user_id, images, results, location, plant_type, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    diagnostic_data["id"],
+                    diagnostic_data["userId"],
+                    json.dumps(diagnostic_data["images"]),
+                    json.dumps(diagnostic_data["results"]),
+                    json.dumps(diagnostic_data.get("location", {})),
+                    diagnostic_data.get("plantType", ""),
+                    diagnostic_data.get("status", "completed"),
+                    diagnostic_data["createdAt"],
+                    datetime.utcnow()
+                ))
+                conn.commit()
+    
+    def get_diagnostics(self, user_id: str, limit: int = 10, offset: int = 0, 
+                       sort_by: str = "created_at", order: str = "desc") -> Dict[str, Any]:
+        """Récupérer les diagnostics d'un utilisateur."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                # Compter le total
+                cursor = conn.execute("""
+                    SELECT COUNT(*) FROM diagnostics WHERE user_id = ?
+                """, (user_id,))
+                total = cursor.fetchone()[0]
+                
+                # Récupérer les diagnostics
+                order_clause = f"ORDER BY {sort_by} {order.upper()}"
+                cursor = conn.execute(f"""
+                    SELECT id, user_id, images, results, location, plant_type, status, created_at, updated_at
+                    FROM diagnostics WHERE user_id = ?
+                    {order_clause}
+                    LIMIT ? OFFSET ?
+                """, (user_id, limit, offset))
+                
+                diagnostics = []
+                for row in cursor.fetchall():
+                    diagnostics.append({
+                        "id": row[0],
+                        "userId": row[1],
+                        "images": json.loads(row[2]),
+                        "results": json.loads(row[3]),
+                        "location": json.loads(row[4]) if row[4] else {},
+                        "plantType": row[5],
+                        "status": row[6],
+                        "createdAt": row[7],
+                        "updatedAt": row[8]
+                    })
+                
+                return {
+                    "success": True,
+                    "diagnostics": diagnostics,
+                    "pagination": {
+                        "total": total,
+                        "limit": limit,
+                        "offset": offset,
+                        "hasMore": offset + limit < total
+                    }
+                }
+    
+    def get_diagnostic_by_id(self, diagnostic_id: str) -> Optional[Dict[str, Any]]:
+        """Récupérer un diagnostic par ID."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                cursor = conn.execute("""
+                    SELECT id, user_id, images, results, location, plant_type, status, created_at, updated_at
+                    FROM diagnostics WHERE id = ?
+                """, (diagnostic_id,))
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "id": row[0],
+                        "userId": row[1],
+                        "images": json.loads(row[2]),
+                        "results": json.loads(row[3]),
+                        "location": json.loads(row[4]) if row[4] else {},
+                        "plantType": row[5],
+                        "status": row[6],
+                        "createdAt": row[7],
+                        "updatedAt": row[8]
+                    }
+                return None
+    
+    def get_user_stats(self, user_id: str) -> Dict[str, Any]:
+        """Récupérer les statistiques d'un utilisateur."""
+        with self._lock:
+            with sqlite3.connect(str(self.db_path)) as conn:
+                # Statistiques des prédictions
+                cursor = conn.execute("""
+                    SELECT 
+                        COUNT(*) as total_predictions,
+                        AVG(confidence_avg) as avg_confidence,
+                        COUNT(DISTINCT DATE(timestamp)) as active_days
+                    FROM predictions 
+                    WHERE user_id = ?
+                """, (user_id,))
+                pred_stats = cursor.fetchone()
+                
+                # Statistiques des diagnostics
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as total_diagnostics
+                    FROM diagnostics 
+                    WHERE user_id = ?
+                """, (user_id,))
+                diag_stats = cursor.fetchone()
+                
+                return {
+                    "totalPredictions": pred_stats[0] or 0,
+                    "averageConfidence": round(pred_stats[1] or 0, 2),
+                    "activeDays": pred_stats[2] or 0,
+                    "totalDiagnostics": diag_stats[0] or 0
                 }
     
     def cleanup_old_data(self, days_to_keep: int = 30):

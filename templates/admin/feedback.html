@@ -1,48 +1,452 @@
 {% extends "admin/base.html" %}
-{% block content %}
-<h1 class="text-2xl font-semibold mb-4">Feedback</h1>
 
-<div class="bg-white rounded shadow p-4">
-  <table class="w-full text-sm">
-    <thead>
-      <tr class="border-b text-gray-600">
-        <th class="text-left py-2">Date</th>
-        <th class="text-left">User</th>
-        <th class="text-left">Fichier</th>
-        <th class="text-right">Détections</th>
-        <th class="text-right">Conf. moy</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in history %}
-      <tr class="border-b last:border-0">
-        <td class="py-2">{{ row.timestamp }}</td>
-        <td>{{ row.user_id }}</td>
-        <td>{{ row.image_filename or '-' }}</td>
-        <td class="text-right">{{ row.num_detections }}</td>
-        <td class="text-right">{{ row.confidence_avg|round(3) }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div class="flex justify-between items-center mt-3">
-    <button
-      class="px-3 py-1 bg-gray-100 rounded disabled:opacity-50"
-      hx-get="/admin/feedback?page={{ page-1 if page>1 else 1 }}&size={{ size }}"
-      hx-target="main"
-      hx-swap="innerHTML"
-      {% if page<=1 %}disabled{% endif %}
-    >Précédent</button>
-    <div class="text-sm">Page {{ page }} • Total {{ total }}</div>
-    <button
-      class="px-3 py-1 bg-gray-100 rounded disabled:opacity-50"
-      hx-get="/admin/feedback?page={{ page+1 }}&size={{ size }}"
-      hx-target="main"
-      hx-swap="innerHTML"
-      {% if page*size >= total %}disabled{% endif %}
-    >Suivant</button>
+{% block header %}Gestion du Feedback{% endblock %}
+
+{% block content %}
+<div x-data="feedbackManager()" x-init="init()" class="space-y-6">
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Total Feedback</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="feedback.length"></p>
+        </div>
+        <div class="h-12 w-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-comments text-blue-600 dark:text-blue-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Confiance Moyenne</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="averageConfidence + '%'"></p>
+        </div>
+        <div class="h-12 w-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-chart-line text-green-600 dark:text-green-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Détections Total</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="totalDetections"></p>
+        </div>
+        <div class="h-12 w-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-search text-purple-600 dark:text-purple-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Ce Mois</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="thisMonthFeedback"></p>
+        </div>
+        <div class="h-12 w-12 bg-orange-100 dark:bg-orange-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-calendar text-orange-600 dark:text-orange-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters and Actions -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
+      <!-- Search and Filters -->
+      <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+        <div class="relative">
+          <input 
+            x-model="searchQuery" 
+            type="text" 
+            placeholder="Rechercher par utilisateur ou fichier..."
+            class="pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full sm:w-64"
+          >
+          <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+        </div>
+        
+        <select x-model="confidenceFilter" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <option value="">Toutes les confiances</option>
+          <option value="high">Haute (≥80%)</option>
+          <option value="medium">Moyenne (60-79%)</option>
+          <option value="low">Faible (<60%)</option>
+        </select>
+
+        <select x-model="dateFilter" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <option value="">Toutes les dates</option>
+          <option value="today">Aujourd'hui</option>
+          <option value="week">Cette semaine</option>
+          <option value="month">Ce mois</option>
+        </select>
+
+        <select x-model="sortBy" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <option value="date">Date récente</option>
+          <option value="confidence">Confiance</option>
+          <option value="detections">Nombre détections</option>
+          <option value="user">Utilisateur</option>
+        </select>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex space-x-2">
+        <button @click="exportFeedback()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center">
+          <i class="fas fa-download mr-2"></i>
+          Exporter
+        </button>
+        <button @click="refreshFeedback()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors flex items-center">
+          <i class="fas fa-sync-alt mr-2"></i>
+          Actualiser
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feedback Table -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50 dark:bg-gray-700">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              <input type="checkbox" @change="toggleSelectAll()" :checked="selectedFeedback.length === filteredFeedback.length && filteredFeedback.length > 0" class="rounded border-gray-300 dark:border-gray-600">
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Utilisateur</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Fichier</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Détections</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Confiance</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Statut</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+          <template x-for="item in paginatedFeedback" :key="item.id">
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <td class="px-6 py-4 whitespace-nowrap">
+                <input type="checkbox" :value="item.id" @change="toggleFeedbackSelection(item.id)" :checked="selectedFeedback.includes(item.id)" class="rounded border-gray-300 dark:border-gray-600">
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white" x-text="formatDate(item.timestamp)"></td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                  <div class="flex-shrink-0 h-8 w-8">
+                    <div class="h-8 w-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-semibold" x-text="getUserInitial(item.user_id)"></div>
+                  </div>
+                  <div class="ml-3">
+                    <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="item.user_id"></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm text-gray-900 dark:text-white" x-text="item.image_filename || '-'"></div>
+                <div class="text-xs text-gray-500 dark:text-gray-400" x-show="item.image_filename" x-text="getFileSize(item.image_filename)"></div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full" :class="getDetectionsBadgeClass(item.num_detections)" x-text="item.num_detections"></span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                  <div class="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2 mr-2">
+                    <div class="h-2 rounded-full" :class="getConfidenceBarClass(item.confidence_avg)" :style="`width: ${item.confidence_avg * 100}%`"></div>
+                  </div>
+                  <span class="text-sm text-gray-900 dark:text-white" x-text="(item.confidence_avg * 100).toFixed(1) + '%'"></span>
+                </div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full" :class="getStatusBadgeClass(item)" x-text="getStatusText(item)"></span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                <div class="flex items-center justify-end space-x-2">
+                  <button @click="viewDetails(item)" class="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300" title="Voir détails">
+                    <i class="fas fa-eye"></i>
+                  </button>
+                  <button @click="downloadImage(item)" class="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300" title="Télécharger image" x-show="item.image_filename">
+                    <i class="fas fa-download"></i>
+                  </button>
+                  <button @click="deleteFeedback(item)" class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300" title="Supprimer">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Empty State -->
+    <div x-show="filteredFeedback.length === 0" class="text-center py-12">
+      <i class="fas fa-comments text-6xl text-gray-300 dark:text-gray-600 mb-4"></i>
+      <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Aucun feedback trouvé</h3>
+      <p class="text-gray-500 dark:text-gray-400">Aucun feedback ne correspond à vos critères de recherche.</p>
+    </div>
+
+    <!-- Pagination -->
+    <div x-show="filteredFeedback.length > 0" class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+      <div class="text-sm text-gray-700 dark:text-gray-300">
+        Affichage de <span x-text="(currentPage - 1) * itemsPerPage + 1"></span> à <span x-text="Math.min(currentPage * itemsPerPage, filteredFeedback.length)"></span> sur <span x-text="filteredFeedback.length"></span> feedback
+      </div>
+      <div class="flex items-center space-x-2">
+        <select x-model="itemsPerPage" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+          <option value="10">10 par page</option>
+          <option value="25">25 par page</option>
+          <option value="50">50 par page</option>
+        </select>
+        <button @click="currentPage = Math.max(1, currentPage - 1)" :disabled="currentPage === 1" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Précédent</button>
+        <span class="px-3 py-1 text-sm" x-text="currentPage + ' / ' + Math.ceil(filteredFeedback.length / itemsPerPage)"></span>
+        <button @click="currentPage = Math.min(Math.ceil(filteredFeedback.length / itemsPerPage), currentPage + 1)" :disabled="currentPage >= Math.ceil(filteredFeedback.length / itemsPerPage)" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Suivant</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Actions -->
+  <div x-show="selectedFeedback.length > 0" class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+    <div class="flex items-center justify-between">
+      <span class="text-sm text-blue-800 dark:text-blue-200">
+        <span x-text="selectedFeedback.length"></span> feedback sélectionné(s)
+      </span>
+      <div class="flex space-x-2">
+        <button @click="bulkExport()" class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
+          <i class="fas fa-download mr-1"></i>
+          Exporter
+        </button>
+        <button @click="bulkDelete()" class="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+          <i class="fas fa-trash mr-1"></i>
+          Supprimer
+        </button>
+      </div>
+    </div>
   </div>
 </div>
+
+<script>
+function feedbackManager() {
+  return {
+    feedback: {{ (history | tojson) or '[]' }},
+    searchQuery: '',
+    confidenceFilter: '',
+    dateFilter: '',
+    sortBy: 'date',
+    selectedFeedback: [],
+    currentPage: 1,
+    itemsPerPage: 10,
+    
+    get filteredFeedback() {
+      let filtered = this.feedback.filter(item => {
+        const matchesSearch = !this.searchQuery || 
+          item.user_id.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+          (item.image_filename && item.image_filename.toLowerCase().includes(this.searchQuery.toLowerCase()));
+        
+        const matchesConfidence = !this.confidenceFilter || 
+          (this.confidenceFilter === 'high' && item.confidence_avg >= 0.8) ||
+          (this.confidenceFilter === 'medium' && item.confidence_avg >= 0.6 && item.confidence_avg < 0.8) ||
+          (this.confidenceFilter === 'low' && item.confidence_avg < 0.6);
+        
+        const matchesDate = !this.dateFilter || this.isWithinDateRange(item.timestamp, this.dateFilter);
+        
+        return matchesSearch && matchesConfidence && matchesDate;
+      });
+      
+      // Sort
+      filtered.sort((a, b) => {
+        switch (this.sortBy) {
+          case 'date':
+            return new Date(b.timestamp) - new Date(a.timestamp);
+          case 'confidence':
+            return b.confidence_avg - a.confidence_avg;
+          case 'detections':
+            return b.num_detections - a.num_detections;
+          case 'user':
+            return a.user_id.localeCompare(b.user_id);
+          default:
+            return 0;
+        }
+      });
+      
+      return filtered;
+    },
+    
+    get paginatedFeedback() {
+      const start = (this.currentPage - 1) * this.itemsPerPage;
+      const end = start + this.itemsPerPage;
+      return this.filteredFeedback.slice(start, end);
+    },
+    
+    get averageConfidence() {
+      if (this.feedback.length === 0) return 0;
+      const total = this.feedback.reduce((sum, item) => sum + (item.confidence_avg || 0), 0);
+      return (total / this.feedback.length * 100).toFixed(1);
+    },
+    
+    get totalDetections() {
+      return this.feedback.reduce((sum, item) => sum + (item.num_detections || 0), 0);
+    },
+    
+    get thisMonthFeedback() {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      return this.feedback.filter(item => new Date(item.timestamp) >= startOfMonth).length;
+    },
+    
+    formatDate(dateString) {
+      if (!dateString) return 'N/A';
+      return new Date(dateString).toLocaleDateString('fr-FR', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    },
+    
+    isWithinDateRange(dateString, range) {
+      const date = new Date(dateString);
+      const now = new Date();
+      
+      switch (range) {
+        case 'today':
+          return date.toDateString() === now.toDateString();
+        case 'week':
+          const weekAgo = new Date(now);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          return date >= weekAgo;
+        case 'month':
+          const monthAgo = new Date(now);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          return date >= monthAgo;
+        default:
+          return true;
+      }
+    },
+    
+    getUserInitial(userId) {
+      return userId ? userId.charAt(0).toUpperCase() : '?';
+    },
+    
+    getFileSize(filename) {
+      // Mock file size
+      return Math.floor(Math.random() * 5000 + 500) + ' KB';
+    },
+    
+    getDetectionsBadgeClass(count) {
+      if (count === 0) return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200';
+      if (count <= 2) return 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200';
+      if (count <= 5) return 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200';
+      return 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200';
+    },
+    
+    getConfidenceBarClass(confidence) {
+      if (confidence >= 0.8) return 'bg-green-500';
+      if (confidence >= 0.6) return 'bg-yellow-500';
+      return 'bg-red-500';
+    },
+    
+    getStatusBadgeClass(item) {
+      if (item.num_detections === 0) return 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200';
+      if (item.confidence_avg >= 0.8) return 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200';
+      if (item.confidence_avg >= 0.6) return 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200';
+      return 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200';
+    },
+    
+    getStatusText(item) {
+      if (item.num_detections === 0) return 'Aucune détection';
+      if (item.confidence_avg >= 0.8) return 'Excellente';
+      if (item.confidence_avg >= 0.6) return 'Bonne';
+      return 'Faible';
+    },
+    
+    toggleFeedbackSelection(itemId) {
+      const index = this.selectedFeedback.indexOf(itemId);
+      if (index > -1) {
+        this.selectedFeedback.splice(index, 1);
+      } else {
+        this.selectedFeedback.push(itemId);
+      }
+    },
+    
+    toggleSelectAll() {
+      if (this.selectedFeedback.length === this.filteredFeedback.length) {
+        this.selectedFeedback = [];
+      } else {
+        this.selectedFeedback = this.filteredFeedback.map(item => item.id);
+      }
+    },
+    
+    viewDetails(item) {
+      // Implement feedback details modal
+      alert(`Détails du feedback de ${item.user_id}`);
+    },
+    
+    downloadImage(item) {
+      if (item.image_filename) {
+        // Implement image download
+        alert(`Téléchargement de ${item.image_filename}`);
+      }
+    },
+    
+    deleteFeedback(item) {
+      if (confirm(`Êtes-vous sûr de vouloir supprimer ce feedback ?`)) {
+        this.feedback = this.feedback.filter(f => f.id !== item.id);
+      }
+    },
+    
+    bulkExport() {
+      const csv = this.selectedFeedback.map(id => {
+        const item = this.feedback.find(f => f.id === id);
+        return `${item.timestamp},${item.user_id},${item.image_filename || ''},${item.num_detections},${item.confidence_avg}`;
+      }).join('\n');
+      
+      const blob = new Blob([`Date,Utilisateur,Fichier,Détections,Confiance\n${csv}`], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'feedback_selection.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    
+    bulkDelete() {
+      if (confirm(`Êtes-vous sûr de vouloir supprimer ${this.selectedFeedback.length} feedback ?`)) {
+        this.feedback = this.feedback.filter(f => !this.selectedFeedback.includes(f.id));
+        this.selectedFeedback = [];
+      }
+    },
+    
+    exportFeedback() {
+      const csv = this.filteredFeedback.map(item => 
+        `${item.timestamp},${item.user_id},${item.image_filename || ''},${item.num_detections},${item.confidence_avg}`
+      ).join('\n');
+      
+      const blob = new Blob([`Date,Utilisateur,Fichier,Détections,Confiance\n${csv}`], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'feedback_export.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    
+    refreshFeedback() {
+      location.reload();
+    },
+    
+    init() {
+      // Initialize with sample data if empty
+      if (this.feedback.length === 0) {
+        this.feedback = [
+          { id: 1, timestamp: new Date().toISOString(), user_id: 'user1', image_filename: 'plant1.jpg', num_detections: 3, confidence_avg: 0.85 },
+          { id: 2, timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), user_id: 'user2', image_filename: 'plant2.jpg', num_detections: 1, confidence_avg: 0.92 },
+          { id: 3, timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), user_id: 'user3', image_filename: 'plant3.jpg', num_detections: 0, confidence_avg: 0.0 },
+          { id: 4, timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(), user_id: 'user1', image_filename: 'plant4.jpg', num_detections: 2, confidence_avg: 0.68 },
+          { id: 5, timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), user_id: 'user4', image_filename: 'plant5.jpg', num_detections: 4, confidence_avg: 0.45 }
+        ];
+      }
+    }
+  }
+}
+</script>
 {% endblock %}
-
-

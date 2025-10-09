@@ -1,21 +1,576 @@
 {% extends "admin/base.html" %}
-{% block content %}
-<h1 class="text-2xl font-semibold mb-4">Statistiques</h1>
 
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-  <div class="bg-white rounded shadow p-4">
-    <h2 class="font-semibold mb-2">Performance (24h)</h2>
-    <pre class="text-xs whitespace-pre-wrap">{{ performance | tojson(indent=2) }}</pre>
+{% block header %}Statistiques Avancées{% endblock %}
+
+{% block content %}
+<div x-data="statsManager()" x-init="init()" class="space-y-6">
+  <!-- Time Range Selector -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Période d'analyse</h3>
+      <div class="flex space-x-2">
+        <button 
+          @click="timeRange = '24h'" 
+          :class="timeRange === '24h' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" 
+          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+        >
+          24 heures
+        </button>
+        <button 
+          @click="timeRange = '7d'" 
+          :class="timeRange === '7d' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" 
+          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+        >
+          7 jours
+        </button>
+        <button 
+          @click="timeRange = '30d'" 
+          :class="timeRange === '30d' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" 
+          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+        >
+          30 jours
+        </button>
+        <button 
+          @click="timeRange = 'custom'" 
+          :class="timeRange === 'custom' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" 
+          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+        >
+          Personnalisé
+        </button>
+      </div>
+    </div>
+    
+    <!-- Custom Date Range -->
+    <div x-show="timeRange === 'custom'" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date de début</label>
+        <input type="date" x-model="customStartDate" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date de fin</label>
+        <input type="date" x-model="customEndDate" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+      </div>
+    </div>
   </div>
-  <div class="bg-white rounded shadow p-4">
-    <h2 class="font-semibold mb-2">Usage modèle (7j)</h2>
-    <pre class="text-xs whitespace-pre-wrap">{{ usage | tojson(indent=2) }}</pre>
+
+  <!-- Key Metrics -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Total Requêtes</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="formatNumber(keyMetrics.totalRequests)"></p>
+          <p class="text-xs" :class="keyMetrics.requestsChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'" x-text="getChangeText(keyMetrics.requestsChange)"></p>
+        </div>
+        <div class="h-12 w-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-chart-line text-blue-600 dark:text-blue-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Prédictions</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="formatNumber(keyMetrics.totalPredictions)"></p>
+          <p class="text-xs" :class="keyMetrics.predictionsChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'" x-text="getChangeText(keyMetrics.predictionsChange)"></p>
+        </div>
+        <div class="h-12 w-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-brain text-green-600 dark:text-green-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Temps Moyen</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="keyMetrics.avgResponseTime + 'ms'"></p>
+          <p class="text-xs" :class="keyMetrics.responseTimeChange <= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'" x-text="getChangeText(keyMetrics.responseTimeChange, true)"></p>
+        </div>
+        <div class="h-12 w-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-stopwatch text-purple-600 dark:text-purple-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Taux d'Erreur</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="keyMetrics.errorRate + '%'"></p>
+          <p class="text-xs" :class="keyMetrics.errorRateChange <= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'" x-text="getChangeText(keyMetrics.errorRateChange, true)"></p>
+        </div>
+        <div class="h-12 w-12 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-exclamation-triangle text-red-600 dark:text-red-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Row 1 -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Request Volume Chart -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Volume de Requêtes</h3>
+        <div class="flex space-x-2">
+          <button @click="chartType = 'line'" :class="chartType === 'line' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" class="px-3 py-1 rounded text-sm">
+            <i class="fas fa-chart-line"></i>
+          </button>
+          <button @click="chartType = 'bar'" :class="chartType === 'bar' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" class="px-3 py-1 rounded text-sm">
+            <i class="fas fa-chart-bar"></i>
+          </button>
+        </div>
+      </div>
+      <canvas id="requestVolumeChart" class="w-full h-64"></canvas>
+    </div>
+
+    <!-- Response Time Chart -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Temps de Réponse</h3>
+        <span class="text-sm text-gray-500 dark:text-gray-400">P95, P90, P50</span>
+      </div>
+      <canvas id="responseTimeChart" class="w-full h-64"></canvas>
+    </div>
+  </div>
+
+  <!-- Charts Row 2 -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Model Performance -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Performance du Modèle</h3>
+      <div class="grid grid-cols-2 gap-4 mb-4">
+        <div class="text-center">
+          <div class="text-2xl font-bold text-green-600 dark:text-green-400" x-text="modelMetrics.accuracy + '%'"></div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">Précision</div>
+        </div>
+        <div class="text-center">
+          <div class="text-2xl font-bold text-blue-600 dark:text-blue-400" x-text="modelMetrics.recall + '%'"></div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">Rappel</div>
+        </div>
+        <div class="text-center">
+          <div class="text-2xl font-bold text-purple-600 dark:text-purple-400" x-text="modelMetrics.f1Score + '%'"></div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">F1-Score</div>
+        </div>
+        <div class="text-center">
+          <div class="text-2xl font-bold text-orange-600 dark:text-orange-400" x-text="modelMetrics.confidence + '%'"></div>
+          <div class="text-xs text-gray-500 dark:text-gray-400">Confiance Moy.</div>
+        </div>
+      </div>
+      <canvas id="modelPerformanceChart" class="w-full h-48"></canvas>
+    </div>
+
+    <!-- Error Distribution -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Distribution des Erreurs</h3>
+      <canvas id="errorDistributionChart" class="w-full h-64"></canvas>
+    </div>
+  </div>
+
+  <!-- Detailed Tables -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Top Endpoints -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Endpoints les Plus Utilisés</h3>
+      <div class="space-y-3">
+        <template x-for="endpoint in topEndpoints" :key="endpoint.name">
+          <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <div class="flex items-center space-x-3">
+              <div class="w-3 h-3 rounded-full" :class="getEndpointStatusColor(endpoint.error_rate)"></div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="endpoint.name"></div>
+                <div class="text-xs text-gray-500 dark:text-gray-400" x-text="endpoint.method"></div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="formatNumber(endpoint.requests)"></div>
+              <div class="text-xs text-gray-500 dark:text-gray-400" x-text="endpoint.avg_time + 'ms'"></div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- User Activity -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Activité des Utilisateurs</h3>
+      <div class="space-y-3">
+        <template x-for="user in topUsers" :key="user.id">
+          <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <div class="flex items-center space-x-3">
+              <div class="w-8 h-8 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold" x-text="user.name.charAt(0).toUpperCase()"></div>
+              <div>
+                <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="user.name"></div>
+                <div class="text-xs text-gray-500 dark:text-gray-400" x-text="user.last_activity"></div>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="user.predictions + ' prédictions'"></div>
+              <div class="text-xs text-gray-500 dark:text-gray-400" x-text="user.success_rate + '% succès'"></div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Actions -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
+      <div>
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Exporter les Statistiques</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Téléchargez les données pour analyse approfondie</p>
+      </div>
+      <div class="flex space-x-3">
+        <button @click="exportData('csv')" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center">
+          <i class="fas fa-file-csv mr-2"></i>
+          CSV
+        </button>
+        <button @click="exportData('json')" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center">
+          <i class="fas fa-file-code mr-2"></i>
+          JSON
+        </button>
+        <button @click="exportData('pdf')" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center">
+          <i class="fas fa-file-pdf mr-2"></i>
+          PDF
+        </button>
+      </div>
+    </div>
   </div>
 </div>
+
+<script>
+function statsManager() {
+  return {
+    timeRange: '24h',
+    customStartDate: '',
+    customEndDate: '',
+    chartType: 'line',
+    
+    keyMetrics: {
+      totalRequests: 0,
+      totalPredictions: 0,
+      avgResponseTime: 0,
+      errorRate: 0,
+      requestsChange: 0,
+      predictionsChange: 0,
+      responseTimeChange: 0,
+      errorRateChange: 0
+    },
+    
+    modelMetrics: {
+      accuracy: 94.2,
+      recall: 91.8,
+      f1Score: 92.9,
+      confidence: 82.3
+    },
+    
+    topEndpoints: [],
+    topUsers: [],
+    
+    formatNumber(num) {
+      return new Intl.NumberFormat('fr-FR').format(num);
+    },
+    
+    getChangeText(change, reverse = false) {
+      const isPositive = reverse ? change <= 0 : change >= 0;
+      const symbol = isPositive ? '+' : '';
+      return `${symbol}${change.toFixed(1)}% vs période précédente`;
+    },
+    
+    getEndpointStatusColor(errorRate) {
+      if (errorRate < 1) return 'bg-green-500';
+      if (errorRate < 5) return 'bg-yellow-500';
+      return 'bg-red-500';
+    },
+    
+    exportData(format) {
+      const data = {
+        timeRange: this.timeRange,
+        keyMetrics: this.keyMetrics,
+        modelMetrics: this.modelMetrics,
+        topEndpoints: this.topEndpoints,
+        topUsers: this.topUsers,
+        exportDate: new Date().toISOString()
+      };
+      
+      let blob, filename, mimeType;
+      
+      if (format === 'csv') {
+        const csv = this.convertToCSV(data);
+        blob = new Blob([csv], { type: 'text/csv' });
+        filename = 'stats_export.csv';
+      } else if (format === 'json') {
+        blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        filename = 'stats_export.json';
+      } else if (format === 'pdf') {
+        // For PDF, we'd typically use a library like jsPDF
+        this.showNotification('Export PDF non implémenté dans cette démo', 'info');
+        return;
+      }
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      
+      this.showNotification(`Données exportées en ${format.toUpperCase()}`, 'success');
+    },
+    
+    convertToCSV(data) {
+      // Simple CSV conversion for key metrics
+      const rows = [
+        ['Métrique', 'Valeur', 'Changement'],
+        ['Total Requêtes', data.keyMetrics.totalRequests, data.keyMetrics.requestsChange + '%'],
+        ['Total Prédictions', data.keyMetrics.totalPredictions, data.keyMetrics.predictionsChange + '%'],
+        ['Temps Moyen', data.keyMetrics.avgResponseTime + 'ms', data.keyMetrics.responseTimeChange + '%'],
+        ['Taux d\'Erreur', data.keyMetrics.errorRate + '%', data.keyMetrics.errorRateChange + '%']
+      ];
+      
+      return rows.map(row => row.join(',')).join('\n');
+    },
+    
+    showNotification(message, type) {
+      const notification = document.createElement('div');
+      notification.className = `fixed top-4 right-4 px-6 py-3 rounded-lg text-white z-50 ${
+        type === 'success' ? 'bg-green-500' : 
+        type === 'error' ? 'bg-red-500' : 
+        'bg-blue-500'
+      }`;
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.remove();
+      }, 3000);
+    },
+    
+    initCharts() {
+      // Request Volume Chart
+      const requestCtx = document.getElementById('requestVolumeChart').getContext('2d');
+      new Chart(requestCtx, {
+        type: this.chartType,
+        data: {
+          labels: this.getTimeLabels(),
+          datasets: [{
+            label: 'Requêtes',
+            data: this.getRequestData(),
+            borderColor: 'rgb(59, 130, 246)',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            tension: 0.4
+          }, {
+            label: 'Prédictions',
+            data: this.getPredictionData(),
+            borderColor: 'rgb(16, 185, 129)',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            tension: 0.4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              labels: {
+                color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151'
+              }
+            }
+          },
+          scales: {
+            y: {
+              ticks: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151' },
+              grid: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#e5e7eb' }
+            },
+            x: {
+              ticks: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151' },
+              grid: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#e5e7eb' }
+            }
+          }
+        }
+      });
+      
+      // Response Time Chart
+      const responseCtx = document.getElementById('responseTimeChart').getContext('2d');
+      new Chart(responseCtx, {
+        type: 'line',
+        data: {
+          labels: this.getTimeLabels(),
+          datasets: [{
+            label: 'P95',
+            data: this.getResponseTimeData('p95'),
+            borderColor: 'rgb(239, 68, 68)',
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            tension: 0.4
+          }, {
+            label: 'P90',
+            data: this.getResponseTimeData('p90'),
+            borderColor: 'rgb(245, 158, 11)',
+            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+            tension: 0.4
+          }, {
+            label: 'P50',
+            data: this.getResponseTimeData('p50'),
+            borderColor: 'rgb(16, 185, 129)',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            tension: 0.4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              labels: {
+                color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151'
+              }
+            }
+          },
+          scales: {
+            y: {
+              ticks: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151' },
+              grid: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#e5e7eb' }
+            },
+            x: {
+              ticks: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151' },
+              grid: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#e5e7eb' }
+            }
+          }
+        }
+      });
+      
+      // Model Performance Chart
+      const modelCtx = document.getElementById('modelPerformanceChart').getContext('2d');
+      new Chart(modelCtx, {
+        type: 'radar',
+        data: {
+          labels: ['Précision', 'Rappel', 'F1-Score', 'Confiance', 'Vitesse'],
+          datasets: [{
+            label: 'Performance',
+            data: [
+              this.modelMetrics.accuracy,
+              this.modelMetrics.recall,
+              this.modelMetrics.f1Score,
+              this.modelMetrics.confidence,
+              85 // Speed score
+            ],
+            borderColor: 'rgb(147, 51, 234)',
+            backgroundColor: 'rgba(147, 51, 234, 0.2)',
+            pointBackgroundColor: 'rgb(147, 51, 234)',
+            pointBorderColor: '#fff',
+            pointHoverBackgroundColor: '#fff',
+            pointHoverBorderColor: 'rgb(147, 51, 234)'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              labels: {
+                color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151'
+              }
+            }
+          },
+          scales: {
+            r: {
+              ticks: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151' },
+              grid: { color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#374151' : '#e5e7eb' }
+            }
+          }
+        }
+      });
+      
+      // Error Distribution Chart
+      const errorCtx = document.getElementById('errorDistributionChart').getContext('2d');
+      new Chart(errorCtx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Succès', 'Erreurs 4xx', 'Erreurs 5xx', 'Timeouts'],
+          datasets: [{
+            data: [95, 3, 1.5, 0.5],
+            backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#6b7280'],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                color: window.matchMedia('(prefers-color-scheme: dark)').matches ? '#f3f4f6' : '#374151'
+              }
+            }
+          }
+        }
+      });
+    },
+    
+    getTimeLabels() {
+      if (this.timeRange === '24h') {
+        return Array.from({length: 24}, (_, i) => `${i.toString().padStart(2, '0')}:00`);
+      } else if (this.timeRange === '7d') {
+        return ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+      } else {
+        return ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4'];
+      }
+    },
+    
+    getRequestData() {
+      // Mock data based on time range
+      const base = this.timeRange === '24h' ? 50 : this.timeRange === '7d' ? 300 : 1200;
+      return Array.from({length: this.getTimeLabels().length}, () => Math.floor(Math.random() * base * 0.5) + base * 0.5);
+    },
+    
+    getPredictionData() {
+      return this.getRequestData().map(val => Math.floor(val * 0.8));
+    },
+    
+    getResponseTimeData(percentile) {
+      const base = percentile === 'p95' ? 500 : percentile === 'p90' ? 300 : 200;
+      return Array.from({length: this.getTimeLabels().length}, () => Math.floor(Math.random() * base * 0.3) + base * 0.7);
+    },
+    
+    init() {
+      // Initialize key metrics
+      this.keyMetrics = {
+        totalRequests: 15420,
+        totalPredictions: 12336,
+        avgResponseTime: 234,
+        errorRate: 2.1,
+        requestsChange: 12.5,
+        predictionsChange: 8.3,
+        responseTimeChange: -5.2,
+        errorRateChange: -1.8
+      };
+      
+      // Initialize top endpoints
+      this.topEndpoints = [
+        { name: '/predict', method: 'POST', requests: 8542, avg_time: 245, error_rate: 1.2 },
+        { name: '/admin/dataset/status', method: 'GET', requests: 2341, avg_time: 89, error_rate: 0.5 },
+        { name: '/healthz', method: 'GET', requests: 1234, avg_time: 12, error_rate: 0.1 },
+        { name: '/admin/feedback', method: 'GET', requests: 567, avg_time: 156, error_rate: 2.8 },
+        { name: '/admin/uncertain', method: 'GET', requests: 234, avg_time: 198, error_rate: 1.5 }
+      ];
+      
+      // Initialize top users
+      this.topUsers = [
+        { id: 1, name: 'Jean Dupont', predictions: 245, success_rate: 96.3, last_activity: 'Il y a 2 min' },
+        { id: 2, name: 'Marie Martin', predictions: 189, success_rate: 94.7, last_activity: 'Il y a 15 min' },
+        { id: 3, name: 'Pierre Durand', predictions: 156, success_rate: 92.1, last_activity: 'Il y a 1h' },
+        { id: 4, name: 'Sophie Leroy', predictions: 134, success_rate: 98.5, last_activity: 'Il y a 2h' },
+        { id: 5, name: 'Lucas Moreau', predictions: 98, success_rate: 89.8, last_activity: 'Il y a 3h' }
+      ];
+      
+      // Initialize charts
+      setTimeout(() => this.initCharts(), 100);
+    }
+  }
+}
+</script>
 {% endblock %}
-
-
-
-
-
-

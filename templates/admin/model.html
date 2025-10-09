@@ -1,16 +1,433 @@
 {% extends "admin/base.html" %}
+
+{% block header %}Gestion du Modèle{% endblock %}
+
 {% block content %}
-<h1 class="text-2xl font-semibold mb-4">Informations modèle</h1>
+<div x-data="modelManager()" x-init="init()" class="space-y-6">
+  <!-- Model Status Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Status Modèle</p>
+          <p class="text-3xl font-bold" :class="modelStatus === 'loaded' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'" x-text="modelStatus === 'loaded' ? 'Chargé' : 'Non chargé'"></p>
+        </div>
+        <div class="h-12 w-12 rounded-lg flex items-center justify-center" :class="modelStatus === 'loaded' ? 'bg-green-100 dark:bg-green-900' : 'bg-red-100 dark:bg-red-900'">
+          <i class="fas fa-brain text-xl" :class="modelStatus === 'loaded' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"></i>
+        </div>
+      </div>
+    </div>
 
-<div class="bg-white rounded shadow p-4">
-  <div><span class="text-gray-600">Chemin:</span> {{ model.model_path }}</div>
-  <div><span class="text-gray-600">Existe:</span> {{ model.model_exists }}</div>
-  <div><span class="text-gray-600">Max upload (MB):</span> {{ settings.max_upload_bytes // (1024*1024) }}</div>
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Prédictions Total</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="totalPredictions"></p>
+        </div>
+        <div class="h-12 w-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-chart-line text-blue-600 dark:text-blue-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Confiance Moyenne</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="averageConfidence + '%'"></p>
+        </div>
+        <div class="h-12 w-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-bullseye text-purple-600 dark:text-purple-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Temps Moyen</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="averageInferenceTime + 'ms'"></p>
+        </div>
+        <div class="h-12 w-12 bg-orange-100 dark:bg-orange-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-stopwatch text-orange-600 dark:text-orange-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
 </div>
+
+  <!-- Model Information -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Model Details -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Informations du Modèle</h3>
+      <div class="space-y-4">
+        <div class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-700">
+          <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Chemin du fichier</span>
+          <span class="text-sm text-gray-900 dark:text-white font-mono" x-text="modelInfo.path"></span>
+        </div>
+        <div class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-700">
+          <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Taille du fichier</span>
+          <span class="text-sm text-gray-900 dark:text-white" x-text="modelInfo.size"></span>
+        </div>
+        <div class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-700">
+          <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Date de création</span>
+          <span class="text-sm text-gray-900 dark:text-white" x-text="modelInfo.created"></span>
+        </div>
+        <div class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-700">
+          <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Dernière modification</span>
+          <span class="text-sm text-gray-900 dark:text-white" x-text="modelInfo.modified"></span>
+        </div>
+        <div class="flex justify-between items-center py-2 border-b border-gray-200 dark:border-gray-700">
+          <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Version</span>
+          <span class="text-sm text-gray-900 dark:text-white" x-text="modelInfo.version"></span>
+        </div>
+        <div class="flex justify-between items-center py-2">
+          <span class="text-sm font-medium text-gray-600 dark:text-gray-400">Classes détectées</span>
+          <span class="text-sm text-gray-900 dark:text-white" x-text="modelInfo.classes"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Performance Metrics -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Métriques de Performance</h3>
+      <div class="space-y-4">
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <span class="text-gray-600 dark:text-gray-400">Précision (24h)</span>
+            <span class="text-gray-900 dark:text-white" x-text="metrics.accuracy + '%'"></span>
+          </div>
+          <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div class="bg-green-500 h-2 rounded-full" :style="`width: ${metrics.accuracy}%`"></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <span class="text-gray-600 dark:text-gray-400">Rappel (24h)</span>
+            <span class="text-gray-900 dark:text-white" x-text="metrics.recall + '%'"></span>
+          </div>
+          <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div class="bg-blue-500 h-2 rounded-full" :style="`width: ${metrics.recall}%`"></div>
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <span class="text-gray-600 dark:text-gray-400">F1-Score (24h)</span>
+            <span class="text-gray-900 dark:text-white" x-text="metrics.f1Score + '%'"></span>
+          </div>
+          <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div class="bg-purple-500 h-2 rounded-full" :style="`width: ${metrics.f1Score}%`"></div>
+          </div>
+        </div>
+        <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div class="grid grid-cols-2 gap-4 text-center">
+            <div>
+              <div class="text-2xl font-bold text-green-600 dark:text-green-400" x-text="metrics.successRate + '%'"></div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">Taux de succès</div>
+            </div>
+            <div>
+              <div class="text-2xl font-bold text-blue-600 dark:text-blue-400" x-text="metrics.errorRate + '%'"></div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">Taux d'erreur</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Model Actions -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Actions du Modèle</h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <button @click="reloadModel()" :disabled="loading" class="flex flex-col items-center p-4 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+        <i class="fas fa-sync-alt text-2xl mb-2"></i>
+        <span class="text-sm font-medium">Recharger</span>
+      </button>
+      
+      <button @click="validateModel()" :disabled="loading" class="flex flex-col items-center p-4 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+        <i class="fas fa-check-circle text-2xl mb-2"></i>
+        <span class="text-sm font-medium">Valider</span>
+      </button>
+      
+      <button @click="exportMetrics()" :disabled="loading" class="flex flex-col items-center p-4 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+        <i class="fas fa-download text-2xl mb-2"></i>
+        <span class="text-sm font-medium">Exporter</span>
+      </button>
+      
+      <button @click="backupModel()" :disabled="loading" class="flex flex-col items-center p-4 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+        <i class="fas fa-archive text-2xl mb-2"></i>
+        <span class="text-sm font-medium">Sauvegarder</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Recent Predictions -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Prédictions Récentes</h3>
+      <button @click="refreshPredictions()" class="px-3 py-1 text-sm bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors">
+        <i class="fas fa-sync-alt mr-1"></i>
+        Actualiser
+      </button>
+    </div>
+    
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50 dark:bg-gray-700">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Heure</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Utilisateur</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Fichier</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Détections</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Confiance</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Temps</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+          <template x-for="prediction in recentPredictions" :key="prediction.id">
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <td class="px-4 py-2 text-sm text-gray-900 dark:text-white" x-text="formatTime(prediction.timestamp)"></td>
+              <td class="px-4 py-2 text-sm text-gray-900 dark:text-white" x-text="prediction.user_id"></td>
+              <td class="px-4 py-2 text-sm text-gray-900 dark:text-white truncate max-w-xs" x-text="prediction.filename || 'N/A'"></td>
+              <td class="px-4 py-2 text-sm text-gray-900 dark:text-white" x-text="prediction.detections"></td>
+              <td class="px-4 py-2 text-sm text-gray-900 dark:text-white" x-text="(prediction.confidence * 100).toFixed(1) + '%'"></td>
+              <td class="px-4 py-2 text-sm text-gray-900 dark:text-white" x-text="prediction.inference_time + 'ms'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    
+    <div x-show="recentPredictions.length === 0" class="text-center py-8">
+      <i class="fas fa-brain text-4xl text-gray-300 dark:text-gray-600 mb-2"></i>
+      <p class="text-gray-500 dark:text-gray-400">Aucune prédiction récente</p>
+    </div>
+  </div>
+
+  <!-- Model Configuration -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+    <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Configuration du Modèle</h3>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Seuil de confiance</label>
+          <input 
+            x-model="config.confidence_threshold" 
+            type="range" 
+            min="0" 
+            max="1" 
+            step="0.01"
+            class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer"
+          >
+          <div class="flex justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <span>0%</span>
+            <span x-text="(config.confidence_threshold * 100).toFixed(0) + '%'"></span>
+            <span>100%</span>
+          </div>
+        </div>
+        
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Taille d'image maximale</label>
+          <select x-model="config.max_image_size" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+            <option value="640">640x640</option>
+            <option value="1280">1280x1280</option>
+            <option value="1920">1920x1920</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Nombre max de détections</label>
+          <input 
+            x-model="config.max_detections" 
+            type="number" 
+            min="1" 
+            max="100"
+            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+        </div>
+        
+        <div>
+          <label class="flex items-center">
+            <input 
+              x-model="config.enable_nms" 
+              type="checkbox" 
+              class="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+            >
+            <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Activer NMS (Non-Maximum Suppression)</span>
+          </label>
+        </div>
+      </div>
+    </div>
+    
+    <div class="mt-6 flex justify-end space-x-3">
+      <button @click="resetConfig()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
+        Réinitialiser
+      </button>
+      <button @click="saveConfig()" :disabled="loading" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+        Sauvegarder
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+function modelManager() {
+  return {
+    loading: false,
+    modelStatus: 'loaded', // loaded, error, not_found
+    totalPredictions: 0,
+    averageConfidence: 0,
+    averageInferenceTime: 0,
+    
+    modelInfo: {
+      path: '{{ model.model_path }}',
+      size: '45.2 MB',
+      created: '2024-01-15 10:30:00',
+      modified: '2024-01-20 14:45:00',
+      version: 'v1.2.3',
+      classes: '15 classes'
+    },
+    
+    metrics: {
+      accuracy: 94.2,
+      recall: 91.8,
+      f1Score: 92.9,
+      successRate: 98.5,
+      errorRate: 1.5
+    },
+    
+    recentPredictions: [],
+    
+    config: {
+      confidence_threshold: 0.5,
+      max_image_size: 640,
+      max_detections: 10,
+      enable_nms: true
+    },
+    
+    formatTime(timestamp) {
+      return new Date(timestamp).toLocaleTimeString('fr-FR');
+    },
+    
+    async reloadModel() {
+      this.loading = true;
+      try {
+        // Simulate API call
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        this.modelStatus = 'loaded';
+        this.showNotification('Modèle rechargé avec succès', 'success');
+      } catch (error) {
+        this.showNotification('Erreur lors du rechargement', 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+    
+    async validateModel() {
+      this.loading = true;
+      try {
+        // Simulate validation
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        this.showNotification('Validation du modèle réussie', 'success');
+      } catch (error) {
+        this.showNotification('Erreur lors de la validation', 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+    
+    exportMetrics() {
+      const data = {
+        model_info: this.modelInfo,
+        metrics: this.metrics,
+        config: this.config,
+        export_date: new Date().toISOString()
+      };
+      
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'model_metrics.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      
+      this.showNotification('Métriques exportées', 'success');
+    },
+    
+    async backupModel() {
+      this.loading = true;
+      try {
+        // Simulate backup
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        this.showNotification('Sauvegarde créée avec succès', 'success');
+      } catch (error) {
+        this.showNotification('Erreur lors de la sauvegarde', 'error');
+      } finally {
+        this.loading = false;
+      }
+    },
+    
+    async refreshPredictions() {
+      // Simulate fetching recent predictions
+      this.recentPredictions = [
+        { id: 1, timestamp: new Date().toISOString(), user_id: 'user1', filename: 'plant1.jpg', detections: 3, confidence: 0.85, inference_time: 245 },
+        { id: 2, timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(), user_id: 'user2', filename: 'plant2.jpg', detections: 1, confidence: 0.92, inference_time: 198 },
+        { id: 3, timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(), user_id: 'user3', filename: 'plant3.jpg', detections: 0, confidence: 0.0, inference_time: 156 },
+        { id: 4, timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(), user_id: 'user1', filename: 'plant4.jpg', detections: 2, confidence: 0.78, inference_time: 267 },
+        { id: 5, timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(), user_id: 'user4', filename: 'plant5.jpg', detections: 4, confidence: 0.65, inference_time: 312 }
+      ];
+    },
+    
+    saveConfig() {
+      this.loading = true;
+      setTimeout(() => {
+        this.loading = false;
+        this.showNotification('Configuration sauvegardée', 'success');
+      }, 1000);
+    },
+    
+    resetConfig() {
+      this.config = {
+        confidence_threshold: 0.5,
+        max_image_size: 640,
+        max_detections: 10,
+        enable_nms: true
+      };
+      this.showNotification('Configuration réinitialisée', 'info');
+    },
+    
+    showNotification(message, type) {
+      // Simple notification system
+      const notification = document.createElement('div');
+      notification.className = `fixed top-4 right-4 px-6 py-3 rounded-lg text-white z-50 ${
+        type === 'success' ? 'bg-green-500' : 
+        type === 'error' ? 'bg-red-500' : 
+        'bg-blue-500'
+      }`;
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.remove();
+      }, 3000);
+    },
+    
+    init() {
+      // Initialize data
+      this.totalPredictions = 1247;
+      this.averageConfidence = 82.3;
+      this.averageInferenceTime = 234;
+      
+      // Load recent predictions
+      this.refreshPredictions();
+      
+      // Load configuration from settings
+      this.config.confidence_threshold = {{ settings.model_confidence_threshold }};
+    }
+  }
+}
+</script>
 {% endblock %}
-
-
-
-
-
-

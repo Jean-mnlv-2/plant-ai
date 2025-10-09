@@ -1,32 +1,138 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" x-data="{ darkMode: localStorage.getItem('darkMode') === 'true' }" :class="{ 'dark': darkMode }">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ title or 'Plant-AI Admin' }}</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              50: '#f0f9ff',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              900: '#1e3a8a'
+            }
+          }
+        }
+      }
+    }
+  </script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body class="bg-gray-50 text-gray-900">
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
   <div class="min-h-screen flex">
-    <aside class="w-64 bg-white border-r">
-      <div class="p-4 font-semibold">🌱 Plant-AI Admin</div>
-      <nav class="px-2 space-y-1">
-        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/">Dashboard</a>
-        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/uncertain">Incertains</a>
-        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/feedback">Feedback</a>
-        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/stats">Stats</a>
-        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/model">Modèle</a>
-        <a class="block px-3 py-2 rounded hover:bg-gray-100" href="/admin/users">Utilisateurs</a>
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex-shrink-0">
+      <div class="p-4 font-semibold text-lg text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700">
+        <i class="fas fa-seedling text-green-500 mr-2"></i>
+        Plant-AI Admin
+      </div>
+      <nav class="px-2 py-4 space-y-1">
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/">
+          <i class="fas fa-tachometer-alt w-5 mr-3"></i>
+          Dashboard
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/dataset">
+          <i class="fas fa-database w-5 mr-3"></i>
+          Dataset
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/uncertain">
+          <i class="fas fa-question-circle w-5 mr-3"></i>
+          Incertains
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/feedback">
+          <i class="fas fa-comments w-5 mr-3"></i>
+          Feedback
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/stats">
+          <i class="fas fa-chart-bar w-5 mr-3"></i>
+          Stats
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/model">
+          <i class="fas fa-brain w-5 mr-3"></i>
+          Modèle
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/users">
+          <i class="fas fa-users w-5 mr-3"></i>
+          Utilisateurs
+        </a>
       </nav>
+      
+      <!-- Dark Mode Toggle -->
+      <div class="absolute bottom-4 left-4 right-4">
+        <button 
+          @click="darkMode = !darkMode; localStorage.setItem('darkMode', darkMode)"
+          class="w-full flex items-center justify-center px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-200"
+        >
+          <i class="fas fa-moon dark:hidden w-5 mr-2"></i>
+          <i class="fas fa-sun hidden dark:block w-5 mr-2"></i>
+          <span x-text="darkMode ? 'Mode clair' : 'Mode sombre'"></span>
+        </button>
+      </div>
     </aside>
-    <main class="flex-1 p-6">
-      {% block content %}{% endblock %}
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-w-0">
+      <!-- Header -->
+      <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
+            {% block header %}{{ title or 'Admin' }}{% endblock %}
+          </h1>
+          <div class="flex items-center space-x-4">
+            <span class="text-sm text-gray-500 dark:text-gray-400">
+              <i class="fas fa-clock mr-1"></i>
+              <span id="current-time"></span>
+            </span>
+            <div class="h-8 w-8 rounded-full bg-primary-500 flex items-center justify-center">
+              <i class="fas fa-user text-white text-sm"></i>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <div class="flex-1 p-6 overflow-auto">
+        {% block content %}{% endblock %}
+      </div>
     </main>
   </div>
+
+  <!-- Mobile Menu Toggle -->
+  <div class="lg:hidden fixed top-4 left-4 z-50">
+    <button @click="$dispatch('toggle-sidebar')" class="bg-white dark:bg-gray-800 p-2 rounded-lg shadow-lg">
+      <i class="fas fa-bars text-gray-900 dark:text-white"></i>
+    </button>
+  </div>
+
+  <!-- JavaScript -->
+  <script>
+    // Update current time
+    function updateTime() {
+      const now = new Date();
+      document.getElementById('current-time').textContent = now.toLocaleTimeString('fr-FR');
+    }
+    updateTime();
+    setInterval(updateTime, 1000);
+
+    // Mobile sidebar toggle
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('sidebar', () => ({
+        open: false,
+        toggle() {
+          this.open = !this.open;
+        }
+      }));
+    });
+  </script>
 </body>
 </html>
-
-
-

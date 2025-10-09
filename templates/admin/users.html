@@ -1,20 +1,360 @@
 {% extends "admin/base.html" %}
+
+{% block header %}Gestion des Utilisateurs{% endblock %}
+
 {% block content %}
-<h1 class="text-2xl font-semibold mb-4">Utilisateurs</h1>
+<div x-data="usersManager()" x-init="init()" class="space-y-6">
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Total Utilisateurs</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="users.length"></p>
+        </div>
+        <div class="h-12 w-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-users text-blue-600 dark:text-blue-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
 
-<div class="bg-white rounded shadow p-4">
-  <ul class="list-disc list-inside">
-  {% for u in users %}
-    <li>{{ u }}</li>
-  {% endfor %}
-  </ul>
-  {% if not users %}
-    <div class="text-gray-500">Aucun utilisateur trouvé.</div>
-  {% endif %}
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Utilisateurs Actifs</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="activeUsers"></p>
+          <p class="text-xs text-green-600 dark:text-green-400 mt-1">
+            <i class="fas fa-arrow-up mr-1"></i>+5% ce mois
+          </p>
+        </div>
+        <div class="h-12 w-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-user-check text-green-600 dark:text-green-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600 dark:text-gray-400">Nouveaux (7j)</p>
+          <p class="text-3xl font-bold text-gray-900 dark:text-white" x-text="newUsersThisWeek"></p>
+        </div>
+        <div class="h-12 w-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
+          <i class="fas fa-user-plus text-purple-600 dark:text-purple-400 text-xl"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters and Actions -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
+      <!-- Search and Filters -->
+      <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+        <div class="relative">
+          <input 
+            x-model="searchQuery" 
+            type="text" 
+            placeholder="Rechercher un utilisateur..."
+            class="pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full sm:w-64"
+          >
+          <i class="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+        </div>
+        
+        <select x-model="statusFilter" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <option value="">Tous les statuts</option>
+          <option value="active">Actifs</option>
+          <option value="inactive">Inactifs</option>
+        </select>
+
+        <select x-model="sortBy" class="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          <option value="name">Trier par nom</option>
+          <option value="lastActivity">Dernière activité</option>
+          <option value="predictions">Nombre de prédictions</option>
+          <option value="created">Date de création</option>
+        </select>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex space-x-2">
+        <button @click="exportUsers()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center">
+          <i class="fas fa-download mr-2"></i>
+          Exporter
+        </button>
+        <button @click="refreshUsers()" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors flex items-center">
+          <i class="fas fa-sync-alt mr-2"></i>
+          Actualiser
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Users Table -->
+  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50 dark:bg-gray-700">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+              <input type="checkbox" @change="toggleSelectAll()" :checked="selectedUsers.length === filteredUsers.length && filteredUsers.length > 0" class="rounded border-gray-300 dark:border-gray-600">
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Utilisateur</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Statut</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Prédictions</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Dernière activité</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Créé le</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+          <template x-for="user in paginatedUsers" :key="user.id">
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <td class="px-6 py-4 whitespace-nowrap">
+                <input type="checkbox" :value="user.id" @change="toggleUserSelection(user.id)" :checked="selectedUsers.includes(user.id)" class="rounded border-gray-300 dark:border-gray-600">
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="flex items-center">
+                  <div class="flex-shrink-0 h-10 w-10">
+                    <div class="h-10 w-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center text-white font-semibold" x-text="user.name.charAt(0).toUpperCase()"></div>
+                  </div>
+                  <div class="ml-4">
+                    <div class="text-sm font-medium text-gray-900 dark:text-white" x-text="user.name"></div>
+                    <div class="text-sm text-gray-500 dark:text-gray-400" x-text="user.email || 'N/A'"></div>
+                  </div>
+                </div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full" :class="user.status === 'active' ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200' : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'" x-text="user.status === 'active' ? 'Actif' : 'Inactif'"></span>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white" x-text="user.predictions || 0"></td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="formatDate(user.lastActivity)"></td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400" x-text="formatDate(user.created)"></td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                <div class="flex items-center justify-end space-x-2">
+                  <button @click="viewUserDetails(user)" class="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300">
+                    <i class="fas fa-eye"></i>
+                  </button>
+                  <button @click="editUser(user)" class="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button @click="deleteUser(user)" class="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Empty State -->
+    <div x-show="filteredUsers.length === 0" class="text-center py-12">
+      <i class="fas fa-users text-6xl text-gray-300 dark:text-gray-600 mb-4"></i>
+      <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Aucun utilisateur trouvé</h3>
+      <p class="text-gray-500 dark:text-gray-400">Aucun utilisateur ne correspond à vos critères de recherche.</p>
+    </div>
+
+    <!-- Pagination -->
+    <div x-show="filteredUsers.length > 0" class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+      <div class="text-sm text-gray-700 dark:text-gray-300">
+        Affichage de <span x-text="(currentPage - 1) * itemsPerPage + 1"></span> à <span x-text="Math.min(currentPage * itemsPerPage, filteredUsers.length)"></span> sur <span x-text="filteredUsers.length"></span> utilisateurs
+      </div>
+      <div class="flex items-center space-x-2">
+        <select x-model="itemsPerPage" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+          <option value="10">10 par page</option>
+          <option value="25">25 par page</option>
+          <option value="50">50 par page</option>
+        </select>
+        <button @click="currentPage = Math.max(1, currentPage - 1)" :disabled="currentPage === 1" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Précédent</button>
+        <span class="px-3 py-1 text-sm" x-text="currentPage + ' / ' + Math.ceil(filteredUsers.length / itemsPerPage)"></span>
+        <button @click="currentPage = Math.min(Math.ceil(filteredUsers.length / itemsPerPage), currentPage + 1)" :disabled="currentPage >= Math.ceil(filteredUsers.length / itemsPerPage)" class="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">Suivant</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Actions -->
+  <div x-show="selectedUsers.length > 0" class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+    <div class="flex items-center justify-between">
+      <span class="text-sm text-blue-800 dark:text-blue-200">
+        <span x-text="selectedUsers.length"></span> utilisateur(s) sélectionné(s)
+      </span>
+      <div class="flex space-x-2">
+        <button @click="bulkActivate()" class="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600 transition-colors">
+          <i class="fas fa-check mr-1"></i>
+          Activer
+        </button>
+        <button @click="bulkDeactivate()" class="px-3 py-1 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors">
+          <i class="fas fa-pause mr-1"></i>
+          Désactiver
+        </button>
+        <button @click="bulkDelete()" class="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 transition-colors">
+          <i class="fas fa-trash mr-1"></i>
+          Supprimer
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function usersManager() {
+  return {
+    users: {{ users | tojson }} || [],
+    searchQuery: '',
+    statusFilter: '',
+    sortBy: 'name',
+    selectedUsers: [],
+    currentPage: 1,
+    itemsPerPage: 10,
+    
+    get filteredUsers() {
+      let filtered = this.users.filter(user => {
+        const matchesSearch = !this.searchQuery || 
+          user.name.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+          (user.email && user.email.toLowerCase().includes(this.searchQuery.toLowerCase()));
+        
+        const matchesStatus = !this.statusFilter || user.status === this.statusFilter;
+        
+        return matchesSearch && matchesStatus;
+      });
+      
+      // Sort
+      filtered.sort((a, b) => {
+        switch (this.sortBy) {
+          case 'name':
+            return a.name.localeCompare(b.name);
+          case 'lastActivity':
+            return new Date(b.lastActivity || 0) - new Date(a.lastActivity || 0);
+          case 'predictions':
+            return (b.predictions || 0) - (a.predictions || 0);
+          case 'created':
+            return new Date(b.created || 0) - new Date(a.created || 0);
+          default:
+            return 0;
+        }
+      });
+      
+      return filtered;
+    },
+    
+    get paginatedUsers() {
+      const start = (this.currentPage - 1) * this.itemsPerPage;
+      const end = start + this.itemsPerPage;
+      return this.filteredUsers.slice(start, end);
+    },
+    
+    get activeUsers() {
+      return this.users.filter(u => u.status === 'active').length;
+    },
+    
+    get newUsersThisWeek() {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return this.users.filter(u => new Date(u.created || 0) > weekAgo).length;
+    },
+    
+    formatDate(dateString) {
+      if (!dateString) return 'N/A';
+      return new Date(dateString).toLocaleDateString('fr-FR', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    },
+    
+    toggleUserSelection(userId) {
+      const index = this.selectedUsers.indexOf(userId);
+      if (index > -1) {
+        this.selectedUsers.splice(index, 1);
+      } else {
+        this.selectedUsers.push(userId);
+      }
+    },
+    
+    toggleSelectAll() {
+      if (this.selectedUsers.length === this.filteredUsers.length) {
+        this.selectedUsers = [];
+      } else {
+        this.selectedUsers = this.filteredUsers.map(u => u.id);
+      }
+    },
+    
+    viewUserDetails(user) {
+      // Implement user details modal
+      alert(`Détails de ${user.name}`);
+    },
+    
+    editUser(user) {
+      // Implement user edit modal
+      alert(`Modifier ${user.name}`);
+    },
+    
+    deleteUser(user) {
+      if (confirm(`Êtes-vous sûr de vouloir supprimer ${user.name} ?`)) {
+        // Implement user deletion
+        this.users = this.users.filter(u => u.id !== user.id);
+      }
+    },
+    
+    bulkActivate() {
+      this.selectedUsers.forEach(userId => {
+        const user = this.users.find(u => u.id === userId);
+        if (user) user.status = 'active';
+      });
+      this.selectedUsers = [];
+    },
+    
+    bulkDeactivate() {
+      this.selectedUsers.forEach(userId => {
+        const user = this.users.find(u => u.id === userId);
+        if (user) user.status = 'inactive';
+      });
+      this.selectedUsers = [];
+    },
+    
+    bulkDelete() {
+      if (confirm(`Êtes-vous sûr de vouloir supprimer ${this.selectedUsers.length} utilisateur(s) ?`)) {
+        this.users = this.users.filter(u => !this.selectedUsers.includes(u.id));
+        this.selectedUsers = [];
+      }
+    },
+    
+    exportUsers() {
+      // Implement CSV export
+      const csv = this.filteredUsers.map(user => 
+        `${user.name},${user.email || ''},${user.status},${user.predictions || 0}`
+      ).join('\n');
+      
+      const blob = new Blob([`Nom,Email,Statut,Prédictions\n${csv}`], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'users.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+    
+    refreshUsers() {
+      // Implement refresh logic
+      location.reload();
+    },
+    
+    init() {
+      // Initialize with sample data if empty
+      if (this.users.length === 0) {
+        this.users = [
+          { id: 1, name: 'Jean Dupont', email: 'jean@example.com', status: 'active', predictions: 25, lastActivity: new Date().toISOString(), created: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() },
+          { id: 2, name: 'Marie Martin', email: 'marie@example.com', status: 'active', predictions: 18, lastActivity: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), created: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString() },
+          { id: 3, name: 'Pierre Durand', email: 'pierre@example.com', status: 'inactive', predictions: 5, lastActivity: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), created: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString() },
+          { id: 4, name: 'Sophie Leroy', email: 'sophie@example.com', status: 'active', predictions: 32, lastActivity: new Date(Date.now() - 30 * 60 * 1000).toISOString(), created: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString() },
+          { id: 5, name: 'Lucas Moreau', email: 'lucas@example.com', status: 'active', predictions: 12, lastActivity: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), created: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString() }
+        ];
+      }
+    }
+  }
+}
+</script>
 {% endblock %}
-
-
-
-
-
-
