@@ -1,7 +1,6 @@
 """
 API Plant-AI - Backend principal avec toutes les nouvelles fonctionnalités.
 """
-from __future__ import annotations
 
 import io
 import logging
@@ -17,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import Response
 from PIL import Image
 import cv2
 
@@ -60,6 +60,17 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+# Favicon handler to avoid 404 on /favicon.ico
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+        "<rect width='64' height='64' rx='12' fill='#22c55e'/>"
+        "<path d='M20 40c8-4 12-12 24-16' stroke='white' stroke-width='6' fill='none'/>"
+        "<circle cx='20' cy='40' r='4' fill='white'/>"
+        "<circle cx='44' cy='24' r='4' fill='white'/></svg>"
+    )
+    return Response(content=svg, media_type="image/svg+xml")
 
 # Enable CORS
 app.add_middleware(
@@ -94,6 +105,11 @@ templates = Jinja2Templates(directory="templates")
 static_dir = Path("static")
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Serve data directory for admin previews (e.g., /data/uploads/...)
+data_dir = Path("data")
+if data_dir.exists():
+    app.mount("/data", StaticFiles(directory=str(data_dir)), name="data")
 
 # Routers
 app.include_router(admin_router)

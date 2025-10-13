@@ -178,6 +178,11 @@ class DatasetManager:
     async def process_dataset(self) -> Dict[str, Any]:
         """Traite le dataset uploadé (nettoyage, conversion, validation)."""
         try:
+            # Préconditions minimales avant traitement
+            if not (self.raw_data_dir / "TRAIN").exists() or not (self.raw_data_dir / "TEST").exists():
+                raise HTTPException(status_code=400, detail="Données brutes manquantes: dossiers TRAIN/TEST requis")
+            if not (self.raw_data_dir / "train_labels.csv").exists() or not (self.raw_data_dir / "test_labels.csv").exists():
+                raise HTTPException(status_code=400, detail="CSV d'annotations manquants: train_labels.csv et test_labels.csv requis")
             logger.info("Traitement du dataset...")
             
             # Étape 1: Nettoyage des noms de fichiers
@@ -222,7 +227,7 @@ class DatasetManager:
             # Vérifier que le dataset YOLO existe
             data_yaml = self.yolo_dataset_dir / "data.yaml"
             if not data_yaml.exists():
-                raise HTTPException(status_code=400, detail="Dataset YOLO non trouvé. Traitez d'abord le dataset.")
+                raise HTTPException(status_code=400, detail="Dataset YOLO manquant. Veuillez d'abord traiter le dataset.")
             
             # Lancer l'entraînement
             result = await self._run_training(

@@ -12,7 +12,8 @@ sys.path.insert(0, str(backend_path))
 
 def main():
     """Démarrer l'API Plant-AI."""
-    print("🚀 Starting Plant-AI API Server")
+    # Avoid unicode issues on some Windows terminals
+    print("Starting Plant-AI API Server")
     print("=" * 50)
     
     # Vérifier les variables d'environnement
@@ -25,10 +26,10 @@ def main():
     port = int(os.getenv("PLANT_AI_PORT", "8000"))
     reload = os.getenv("PLANT_AI_RELOAD", "true").lower() == "true"
     
-    print(f"📍 Server will start at: http://{host}:{port}")
-    print(f"📚 API Documentation: http://{host}:{port}/docs")
-    print(f"🔧 Admin Dashboard: http://{host}:{port}/admin/")
-    print(f"🔄 Auto-reload: {'Enabled' if reload else 'Disabled'}")
+    print(f"Server will start at: http://{host}:{port}")
+    print(f"API Documentation: http://{host}:{port}/docs")
+    print(f"Admin Dashboard: http://{host}:{port}/admin/")
+    print(f"Auto-reload: {'Enabled' if reload else 'Disabled'}")
     print("=" * 50)
     
     try:

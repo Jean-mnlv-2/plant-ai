@@ -82,7 +82,9 @@
           <button @click="chartTimeframe = '7d'" :class="chartTimeframe === '7d' ? 'bg-blue-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'" class="px-3 py-1 rounded-lg text-sm transition-colors">7j</button>
         </div>
       </div>
-      <canvas id="performanceChart" class="w-full h-64"></canvas>
+      <div class="relative h-64 overflow-hidden">
+        <canvas id="performanceChart" class="absolute inset-0 w-full h-full"></canvas>
+      </div>
     </div>
 
     <!-- Model Usage Chart -->
@@ -91,7 +93,9 @@
         <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Usage du Modèle</h3>
         <span class="text-sm text-gray-500 dark:text-gray-400">7 derniers jours</span>
       </div>
-      <canvas id="modelUsageChart" class="w-full h-64"></canvas>
+      <div class="relative h-64 overflow-hidden">
+        <canvas id="modelUsageChart" class="absolute inset-0 w-full h-full"></canvas>
+      </div>
     </div>
   </div>
 
@@ -239,7 +243,18 @@
   </div>
 </div>
 
+<!-- Embedded JSON data to avoid inline JS parsing issues in editors -->
+<script type="application/json" id="endpoints-data">{{ (stats.by_endpoint | tojson) }}</script>
+
 <script>
+// Load server data safely from embedded JSON
+window.DASHBOARD_ENDPOINTS = (function(){
+  try {
+    const el = document.getElementById('endpoints-data');
+    return el ? JSON.parse(el.textContent || '[]') : [];
+  } catch (e) { return []; }
+})();
+
 function dashboardManager() {
   return {
     searchEndpoint: '',
@@ -249,7 +264,8 @@ function dashboardManager() {
     chartTimeframe: '24h',
     
     get endpoints() {
-      const sorted = [...({{ stats.by_endpoint | tojson }} || [])].sort((a, b) => {
+      const endpointsData = (window.DASHBOARD_ENDPOINTS || []);
+      const sorted = [...endpointsData].sort((a, b) => {
         if (this.sortBy === 'requests') return b.request_count - a.request_count;
         if (this.sortBy === '-requests') return a.request_count - b.request_count;
         if (this.sortBy === 'errors') return b.error_count - a.error_count;
@@ -292,7 +308,10 @@ function dashboardManager() {
     
     initCharts() {
       // Performance Chart
-      const perfCtx = document.getElementById('performanceChart').getContext('2d');
+      const perfCanvas = document.getElementById('performanceChart');
+      const existingPerf = Chart.getChart('performanceChart') || Chart.getChart(perfCanvas);
+      if (existingPerf) existingPerf.destroy();
+      const perfCtx = perfCanvas.getContext('2d');
       new Chart(perfCtx, {
         type: 'line',
         data: {
@@ -346,7 +365,10 @@ function dashboardManager() {
       });
       
       // Model Usage Chart
-      const modelCtx = document.getElementById('modelUsageChart').getContext('2d');
+      const modelCanvas = document.getElementById('modelUsageChart');
+      const existingModel = Chart.getChart('modelUsageChart') || Chart.getChart(modelCanvas);
+      if (existingModel) existingModel.destroy();
+      const modelCtx = modelCanvas.getContext('2d');
       new Chart(modelCtx, {
         type: 'doughnut',
         data: {

@@ -123,7 +123,9 @@
           </button>
         </div>
       </div>
-      <canvas id="requestVolumeChart" class="w-full h-64"></canvas>
+      <div class="relative h-64 overflow-hidden">
+        <canvas id="requestVolumeChart" class="absolute inset-0 w-full h-full"></canvas>
+      </div>
     </div>
 
     <!-- Response Time Chart -->
@@ -132,7 +134,9 @@
         <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Temps de Réponse</h3>
         <span class="text-sm text-gray-500 dark:text-gray-400">P95, P90, P50</span>
       </div>
-      <canvas id="responseTimeChart" class="w-full h-64"></canvas>
+      <div class="relative h-64 overflow-hidden">
+        <canvas id="responseTimeChart" class="absolute inset-0 w-full h-full"></canvas>
+      </div>
     </div>
   </div>
 
@@ -159,13 +163,17 @@
           <div class="text-xs text-gray-500 dark:text-gray-400">Confiance Moy.</div>
         </div>
       </div>
-      <canvas id="modelPerformanceChart" class="w-full h-48"></canvas>
+      <div class="relative h-64 overflow-hidden">
+        <canvas id="modelPerformanceChart" class="absolute inset-0 w-full h-full"></canvas>
+      </div>
     </div>
 
     <!-- Error Distribution -->
     <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 border border-gray-200 dark:border-gray-700">
       <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Distribution des Erreurs</h3>
-      <canvas id="errorDistributionChart" class="w-full h-64"></canvas>
+      <div class="relative h-64 overflow-hidden">
+        <canvas id="errorDistributionChart" class="absolute inset-0 w-full h-full"></canvas>
+      </div>
     </div>
   </div>
 
@@ -351,7 +359,10 @@ function statsManager() {
     
     initCharts() {
       // Request Volume Chart
-      const requestCtx = document.getElementById('requestVolumeChart').getContext('2d');
+      const requestCanvas = document.getElementById('requestVolumeChart');
+      const existingReq = Chart.getChart('requestVolumeChart') || Chart.getChart(requestCanvas);
+      if (existingReq) existingReq.destroy();
+      const requestCtx = requestCanvas.getContext('2d');
       new Chart(requestCtx, {
         type: this.chartType,
         data: {
@@ -394,7 +405,10 @@ function statsManager() {
       });
       
       // Response Time Chart
-      const responseCtx = document.getElementById('responseTimeChart').getContext('2d');
+      const responseCanvas = document.getElementById('responseTimeChart');
+      const existingResp = Chart.getChart('responseTimeChart') || Chart.getChart(responseCanvas);
+      if (existingResp) existingResp.destroy();
+      const responseCtx = responseCanvas.getContext('2d');
       new Chart(responseCtx, {
         type: 'line',
         data: {
@@ -443,7 +457,10 @@ function statsManager() {
       });
       
       // Model Performance Chart
-      const modelCtx = document.getElementById('modelPerformanceChart').getContext('2d');
+      const modelCanvas = document.getElementById('modelPerformanceChart');
+      const existingModelPerf = Chart.getChart('modelPerformanceChart') || Chart.getChart(modelCanvas);
+      if (existingModelPerf) existingModelPerf.destroy();
+      const modelCtx = modelCanvas.getContext('2d');
       new Chart(modelCtx, {
         type: 'radar',
         data: {
@@ -485,7 +502,10 @@ function statsManager() {
       });
       
       // Error Distribution Chart
-      const errorCtx = document.getElementById('errorDistributionChart').getContext('2d');
+      const errorCanvas = document.getElementById('errorDistributionChart');
+      const existingErr = Chart.getChart('errorDistributionChart') || Chart.getChart(errorCanvas);
+      if (existingErr) existingErr.destroy();
+      const errorCtx = errorCanvas.getContext('2d');
       new Chart(errorCtx, {
         type: 'doughnut',
         data: {

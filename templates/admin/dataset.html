@@ -1,10 +1,10 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<div x-data="datasetManager()">
+<div x-data="datasetManager()" class="text-gray-900 dark:text-gray-100">
   <h1 class="text-2xl font-semibold mb-4">Gestion du Dataset</h1>
 
   <!-- Statut du Dataset -->
-  <div class="bg-white rounded shadow p-4 mb-6">
+  <div class="bg-white dark:bg-gray-800 rounded shadow p-4 mb-6 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700">
     <h2 class="text-lg font-semibold mb-3">Statut du Dataset</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <div class="p-3 border rounded">
@@ -81,9 +81,9 @@
   </div>
 
   <!-- Logs d'Activité -->
-  <div class="bg-white rounded shadow p-4">
+  <div class="bg-white dark:bg-gray-800 rounded shadow p-4 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700">
     <h2 class="text-lg font-semibold mb-3">Logs d'Activité</h2>
-    <div class="bg-gray-100 p-3 rounded font-mono text-sm max-h-64 overflow-y-auto">
+    <div class="bg-gray-100 dark:bg-gray-900 p-3 rounded font-mono text-sm max-h-64 overflow-y-auto">
       <template x-for="log in logs" :key="log.id">
         <div class="mb-1">
           <span class="text-gray-500" x-text="log.timestamp"></span>
@@ -95,13 +95,13 @@
 
   <!-- Modal Upload Dataset -->
   <div x-show="showUploadModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" x-cloak>
-    <div class="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+    <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700">
       <h3 class="text-xl font-semibold mb-4">Upload Dataset</h3>
       
       <form @submit.prevent="uploadDataset()" enctype="multipart/form-data">
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">Images d'Entraînement</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Images d'Entraînement</label>
             <input 
               type="file" 
               multiple 
@@ -109,11 +109,11 @@
               @change="handleFileSelect($event, 'trainImages')"
               class="w-full p-2 border rounded"
             >
-            <div class="text-sm text-gray-500" x-text="`${trainImages.length} fichiers sélectionnés`"></div>
+            <div class="text-sm text-gray-500 dark:text-gray-400" x-text="`${trainImages.length} fichiers sélectionnés`"></div>
           </div>
           
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">Images de Test</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Images de Test</label>
             <input 
               type="file" 
               multiple 
@@ -121,11 +121,11 @@
               @change="handleFileSelect($event, 'testImages')"
               class="w-full p-2 border rounded"
             >
-            <div class="text-sm text-gray-500" x-text="`${testImages.length} fichiers sélectionnés`"></div>
+            <div class="text-sm text-gray-500 dark:text-gray-400" x-text="`${testImages.length} fichiers sélectionnés`"></div>
           </div>
           
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">Annotations d'Entraînement (CSV)</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Annotations d'Entraînement (CSV)</label>
             <input 
               type="file" 
               accept=".csv"
@@ -135,7 +135,7 @@
           </div>
           
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">Annotations de Test (CSV)</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Annotations de Test (CSV)</label>
             <input 
               type="file" 
               accept=".csv"
@@ -149,7 +149,7 @@
           <button 
             type="button" 
             @click="showUploadModal = false"
-            class="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+            class="px-4 py-2 bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-400 dark:hover:bg-gray-600"
           >
             Annuler
           </button>
@@ -167,13 +167,13 @@
 
   <!-- Modal Entraînement -->
   <div x-show="showTrainModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" x-cloak>
-    <div class="bg-white rounded-lg p-6 w-full max-w-md">
+    <div class="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700">
       <h3 class="text-xl font-semibold mb-4">Entraîner le Modèle</h3>
       
       <form @submit.prevent="trainModel()">
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">Nombre d'Époques</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Nombre d'Époques</label>
             <input 
               type="number" 
               x-model="trainParams.epochs"
@@ -184,7 +184,7 @@
           </div>
           
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">Taille du Batch</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Taille du Batch</label>
             <input 
               type="number" 
               x-model="trainParams.batchSize"
@@ -195,7 +195,7 @@
           </div>
           
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">Taille des Images</label>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Taille des Images</label>
             <input 
               type="number" 
               x-model="trainParams.imageSize"
@@ -211,7 +211,7 @@
           <button 
             type="button" 
             @click="showTrainModal = false"
-            class="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+            class="px-4 py-2 bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded hover:bg-gray-400 dark:hover:bg-gray-600"
           >
             Annuler
           </button>

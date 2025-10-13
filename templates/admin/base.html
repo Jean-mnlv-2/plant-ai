@@ -24,8 +24,8 @@
     }
   </script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+  <!-- Use UMD build so Chart is available globally (Chart is not defined fix) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
@@ -111,6 +111,18 @@
   <div class="lg:hidden fixed top-4 left-4 z-50">
     <button @click="$dispatch('toggle-sidebar')" class="bg-white dark:bg-gray-800 p-2 rounded-lg shadow-lg">
       <i class="fas fa-bars text-gray-900 dark:text-white"></i>
+    </button>
+  </div>
+
+  <!-- Global Dark Mode Toggle (fixed bottom) -->
+  <div class="fixed bottom-4 right-4 z-50">
+    <button 
+      @click="darkMode = !darkMode; localStorage.setItem('darkMode', darkMode)"
+      class="px-3 py-2 rounded-full bg-gray-900/80 dark:bg-white/80 text-white dark:text-gray-900 shadow-lg backdrop-blur hover:opacity-90 transition"
+      title="Basculer le thème"
+    >
+      <i class="fas fa-moon dark:hidden"></i>
+      <i class="fas fa-sun hidden dark:inline"></i>
     </button>
   </div>
 
