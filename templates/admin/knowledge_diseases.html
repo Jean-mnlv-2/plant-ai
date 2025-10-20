@@ -1,0 +1,266 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Gestion des Fiches Maladies{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex justify-between items-center">
+        <h1 class="text-3xl font-bold text-gray-900 dark:text-white">Gestion des Fiches Maladies</h1>
+        <div>
+            <a href="/admin/knowledge/diseases/create" class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200">
+                <i class="fas fa-plus mr-2"></i>
+                Nouvelle Fiche
+            </a>
+        </div>
+    </div>
+
+    <!-- Filtres -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Filtres de Recherche</h3>
+        </div>
+        <div class="p-6">
+            <form method="GET" action="/admin/knowledge/diseases" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                        <label for="search" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recherche</label>
+                        <input type="text" id="search" name="search" 
+                               value="{{ filters.search or '' }}" 
+                               placeholder="Nom scientifique ou commun"
+                               class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
+                    </div>
+                    <div>
+                        <label for="culture_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Culture</label>
+                        <select id="culture_id" name="culture_id" 
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
+                            <option value="">Toutes les cultures</option>
+                            {% for culture in cultures %}
+                            <option value="{{ culture.id }}" 
+                                    {% if filters.culture_id == culture.id %}selected{% endif %}>
+                                {{ culture.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label for="pathogen_type" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Type de Pathogène</label>
+                        <select id="pathogen_type" name="pathogen_type" 
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
+                            <option value="">Tous les types</option>
+                            <option value="fungus" {% if filters.pathogen_type == 'fungus' %}selected{% endif %}>Champignon</option>
+                            <option value="bacteria" {% if filters.pathogen_type == 'bacteria' %}selected{% endif %}>Bactérie</option>
+                            <option value="virus" {% if filters.pathogen_type == 'virus' %}selected{% endif %}>Virus</option>
+                            <option value="parasite" {% if filters.pathogen_type == 'parasite' %}selected{% endif %}>Parasite</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="severity" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Sévérité</label>
+                        <select id="severity" name="severity" 
+                                class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white">
+                            <option value="">Toutes les sévérités</option>
+                            <option value="low" {% if filters.severity == 'low' %}selected{% endif %}>Faible</option>
+                            <option value="medium" {% if filters.severity == 'medium' %}selected{% endif %}>Moyenne</option>
+                            <option value="high" {% if filters.severity == 'high' %}selected{% endif %}>Élevée</option>
+                            <option value="critical" {% if filters.severity == 'critical' %}selected{% endif %}>Critique</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex space-x-4">
+                    <button type="submit" class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200">
+                        <i class="fas fa-search mr-2"></i>
+                        Rechercher
+                    </button>
+                    <a href="/admin/knowledge/diseases" class="inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-lg transition-colors duration-200">
+                        <i class="fas fa-times mr-2"></i>
+                        Effacer
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Liste des fiches -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md">
+        <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                Fiches Maladies ({{ pagination.total_entries }} au total)
+            </h3>
+            <div>
+                <a href="/admin/knowledge/export" class="inline-flex items-center px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors duration-200">
+                    <i class="fas fa-download mr-2"></i>
+                    Exporter
+                </a>
+            </div>
+        </div>
+        <div class="p-6">
+            {% if entries %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead class="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">ID</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Nom Scientifique</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Nom Commun</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Culture</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Pathogène</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Sévérité</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Urgence</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Créé le</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {% for entry in entries %}
+                        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{{ entry.id }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{{ entry.scientific_name }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{{ entry.common_name }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{{ entry.culture_name or 'N/A' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{{ entry.pathogen_name or 'N/A' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full 
+                                    {% if entry.severity_level == 'high' or entry.severity_level == 'critical' %}bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400
+                                    {% elif entry.severity_level == 'medium' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400
+                                    {% else %}bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400{% endif %}">
+                                    {{ entry.severity_level|title }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full 
+                                    {% if entry.treatment_urgency == 'immediate' %}bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400
+                                    {% elif entry.treatment_urgency == 'urgent' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400
+                                    {% else %}bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400{% endif %}">
+                                    {{ entry.treatment_urgency|title }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">{{ entry.created_at.strftime('%d/%m/%Y') if entry.created_at else 'N/A' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                <div class="flex space-x-2">
+                                    <a href="/admin/knowledge/diseases/{{ entry.id }}/edit" 
+                                       class="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300" 
+                                       title="Modifier">
+                                        <i class="fas fa-edit"></i>
+                                    </a>
+                                    <button type="button" 
+                                            onclick="confirmDelete({{ entry.id }})" 
+                                            class="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300" 
+                                            title="Supprimer">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            {% if pagination.total_pages > 1 %}
+            <div class="mt-6 flex items-center justify-between">
+                <div class="text-sm text-gray-700 dark:text-gray-300">
+                    Affichage de {{ (pagination.current_page - 1) * 20 + 1 }} à {{ pagination.current_page * 20 if pagination.current_page * 20 < pagination.total_entries else pagination.total_entries }} sur {{ pagination.total_entries }} résultats
+                </div>
+                <nav class="flex space-x-2">
+                    {% if pagination.has_prev %}
+                    <a href="?page={{ pagination.current_page - 1 }}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.culture_id %}&culture_id={{ filters.culture_id }}{% endif %}{% if filters.pathogen_type %}&pathogen_type={{ filters.pathogen_type }}{% endif %}{% if filters.severity %}&severity={{ filters.severity }}{% endif %}" 
+                       class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700">
+                        Précédent
+                    </a>
+                    {% endif %}
+                    
+                    {% for page_num in range(1, pagination.total_pages + 1) %}
+                    {% if page_num == pagination.current_page %}
+                    <span class="px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg">
+                        {{ page_num }}
+                    </span>
+                    {% else %}
+                    <a href="?page={{ page_num }}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.culture_id %}&culture_id={{ filters.culture_id }}{% endif %}{% if filters.pathogen_type %}&pathogen_type={{ filters.pathogen_type }}{% endif %}{% if filters.severity %}&severity={{ filters.severity }}{% endif %}" 
+                       class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700">
+                        {{ page_num }}
+                    </a>
+                    {% endif %}
+                    {% endfor %}
+                    
+                    {% if pagination.has_next %}
+                    <a href="?page={{ pagination.current_page + 1 }}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.culture_id %}&culture_id={{ filters.culture_id }}{% endif %}{% if filters.pathogen_type %}&pathogen_type={{ filters.pathogen_type }}{% endif %}{% if filters.severity %}&severity={{ filters.severity }}{% endif %}" 
+                       class="px-3 py-2 text-sm font-medium text-gray-500 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700">
+                        Suivant
+                    </a>
+                    {% endif %}
+                </nav>
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="text-center py-8">
+                <i class="fas fa-book text-4xl text-gray-300 dark:text-gray-600 mb-4"></i>
+                <p class="text-gray-500 dark:text-gray-400 mb-4">Aucune fiche maladie trouvée.</p>
+                <a href="/admin/knowledge/diseases/create" class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200">
+                    <i class="fas fa-plus mr-2"></i>
+                    Créer la première fiche
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal de confirmation de suppression -->
+<div id="deleteModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white dark:bg-gray-800">
+        <div class="mt-3">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-medium text-gray-900 dark:text-white">Confirmer la suppression</h3>
+                <button onclick="closeDeleteModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="mb-4">
+                <p class="text-sm text-gray-500 dark:text-gray-400">Êtes-vous sûr de vouloir supprimer cette fiche maladie ?</p>
+                <p class="text-sm text-red-600 dark:text-red-400 font-medium">Cette action est irréversible.</p>
+            </div>
+            <form id="deleteForm" method="POST">
+                <input type="hidden" name="confirm" value="true">
+                <div class="mb-4">
+                    <label for="deleteReason" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Raison de la suppression (optionnel)</label>
+                    <textarea id="deleteReason" name="reason" rows="3" 
+                              class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 dark:bg-gray-700 dark:text-white"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeDeleteModal()" 
+                            class="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-medium rounded-lg transition-colors duration-200">
+                        Annuler
+                    </button>
+                    <button type="button" onclick="submitDelete()" 
+                            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors duration-200">
+                        Supprimer
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Fonctionnalités spécifiques à la gestion des fiches maladies
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialisation des fonctionnalités
+});
+
+function confirmDelete(diseaseId) {
+    document.getElementById('deleteForm').action = '/admin/knowledge/diseases/' + diseaseId + '/delete';
+    document.getElementById('deleteModal').classList.remove('hidden');
+}
+
+function closeDeleteModal() {
+    document.getElementById('deleteModal').classList.add('hidden');
+}
+
+function submitDelete() {
+    document.getElementById('deleteForm').submit();
+}
+</script>
+{% endblock %}

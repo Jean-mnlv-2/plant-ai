@@ -114,6 +114,13 @@ if data_dir.exists():
 # Routers
 app.include_router(admin_router)
 
+# Import and include knowledge base routers
+from .knowledge_api import router as knowledge_api_router
+from .knowledge_admin import router as knowledge_admin_router
+
+app.include_router(knowledge_api_router)
+app.include_router(knowledge_admin_router)
+
 # -----------------------------------------------------------------------------
 # Upload size limiting middleware
 # -----------------------------------------------------------------------------

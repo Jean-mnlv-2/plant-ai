@@ -27,10 +27,11 @@ python-multipart>=0.0.6,<0.1.0
 # SQLite (développement)
 # Inclus par défaut avec Python
 
-# PostgreSQL (production) - commenté car non utilisé actuellement
-# asyncpg>=0.29.0
-# psycopg2-binary>=2.9.7
-# sqlalchemy/alembic are not used currently; uncomment if needed
+# PostgreSQL (production) - Base de connaissances agronomique
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.7
+
+# SQLAlchemy pour migrations avancées (optionnel)
 # sqlalchemy>=2.0.0
 # alembic>=1.12.0
 

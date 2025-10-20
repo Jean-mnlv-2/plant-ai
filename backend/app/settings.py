@@ -65,6 +65,13 @@ class Settings(BaseSettings):
 
     # JWT Authentication
     jwt_ttl_seconds: int = Field(default=8 * 3600)  # 8 hours
+    
+    # PostgreSQL Configuration
+    postgres_host: str = Field(default="localhost")
+    postgres_port: int = Field(default=5432)
+    postgres_database: str = Field(default="plant_ai")
+    postgres_user: str = Field(default="plant_ai")
+    postgres_password: str = Field(default="plant_ai_password")
 
     # Domain knowledge - mapping classes to recommendations
     class_to_recommendations: Dict[str, List[str]] = Field(

@@ -1,0 +1,13 @@
+/* Tailwind CSS - Version de production */
+/* Ce fichier doit être généré avec: npx tailwindcss -i ./src/input.css -o ./static/css/tailwind.css --watch */
+
+/* En développement, utilisez le CDN Tailwind CSS */
+/* En production, remplacez le CDN par ce fichier CSS compilé */
+
+/* Instructions pour la production :
+   1. Installer Tailwind CSS: npm install -D tailwindcss
+   2. Générer le CSS: npx tailwindcss -i ./src/input.css -o ./static/css/tailwind.css --watch
+   3. Remplacer le CDN dans base.html par: <link rel="stylesheet" href="/static/css/tailwind.css">
+*/
+
+/* Note: Ce fichier est un placeholder. En production, il doit être remplacé par le CSS compilé de Tailwind. */

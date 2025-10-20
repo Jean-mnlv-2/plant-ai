@@ -4,7 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ title or 'Plant-AI Admin' }}</title>
+  <!-- Tailwind CSS - En production, utiliser une version locale -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Note: En production, remplacer par une version locale de Tailwind CSS -->
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -64,6 +66,28 @@
         <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/users">
           <i class="fas fa-users w-5 mr-3"></i>
           Utilisateurs
+        </a>
+        <!-- Base de Connaissances -->
+        <div class="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/knowledge/">
+          <i class="fas fa-book w-5 mr-3"></i>
+          Base de Connaissances
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/knowledge/diseases">
+          <i class="fas fa-list w-5 mr-3"></i>
+          Fiches Maladies
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/knowledge/cultures">
+          <i class="fas fa-seedling w-5 mr-3"></i>
+          Cultures
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/knowledge/pathogens">
+          <i class="fas fa-bug w-5 mr-3"></i>
+          Pathogènes
+        </a>
+        <a class="flex items-center px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200" href="/admin/knowledge/statistics">
+          <i class="fas fa-chart-bar w-5 mr-3"></i>
+          Statistiques
         </a>
       </nav>
       
